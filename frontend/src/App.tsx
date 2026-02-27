@@ -1,10 +1,14 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
-import Navbar from './components/Navbar'
-import Landing from './pages/Landing'
-import Pay from './pages/Pay'
-import Review from './pages/Review'
-import Progress from './pages/Progress'
-import Success from './pages/Success'
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import Navbar from "./components/Navbar";
+import Landing from "./pages/Landing";
+import Pay from "./pages/Pay";
+import Progress from "./pages/Progress";
+import Success from "./pages/Success";
+import PaymentFailed from "./pages/PaymentFailed";
+import MerchantDashboard from "./pages/MerchantDashboard";
+import Storefront from "./pages/Storefront";
+import Receipt from "./pages/Receipt";
+import SubscriptionAuth from "./pages/SubscriptionAuth";
 
 function AppLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -12,7 +16,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
       <Navbar />
       <main>{children}</main>
     </div>
-  )
+  );
 }
 
 export default function App() {
@@ -25,14 +29,6 @@ export default function App() {
           element={
             <AppLayout>
               <Pay />
-            </AppLayout>
-          }
-        />
-        <Route
-          path="/review"
-          element={
-            <AppLayout>
-              <Review />
             </AppLayout>
           }
         />
@@ -52,7 +48,47 @@ export default function App() {
             </AppLayout>
           }
         />
+        <Route
+          path="/failed/:jobId"
+          element={
+            <AppLayout>
+              <PaymentFailed />
+            </AppLayout>
+          }
+        />
+        <Route
+          path="/merchant"
+          element={
+            <AppLayout>
+              <MerchantDashboard />
+            </AppLayout>
+          }
+        />
+        <Route
+          path="/store/:slug"
+          element={
+            <AppLayout>
+              <Storefront />
+            </AppLayout>
+          }
+        />
+        <Route
+          path="/receipt/:jobId"
+          element={
+            <AppLayout>
+              <Receipt />
+            </AppLayout>
+          }
+        />
+        <Route
+          path="/subscribe/:subscriptionId"
+          element={
+            <AppLayout>
+              <SubscriptionAuth />
+            </AppLayout>
+          }
+        />
       </Routes>
     </BrowserRouter>
-  )
+  );
 }
