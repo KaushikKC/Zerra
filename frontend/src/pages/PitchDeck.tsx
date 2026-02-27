@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, ArrowLeft, Globe, Zap, Shield, Wallet, ShoppingBag, Layout, Code, Server, CheckCircle2, ChevronRight, Share2, Layers, Repeat, Cpu, Smartphone, ChevronLeft, ArrowDown, ArrowUp } from 'lucide-react'
+import { ArrowRight, ArrowLeft, Globe, Zap, Shield, Wallet, ShoppingBag, Layout, Code, Server, CheckCircle2, Share2, Layers, Repeat, Cpu, Smartphone } from 'lucide-react'
 
 // Slide Components
 const Slide1 = () => (
@@ -429,8 +429,6 @@ export default function PitchDeck() {
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [nextSlide, prevSlide]);
-
-    const CurrentSlideComponent = SLIDES[currentSlide];
 
     return (
         <div className="h-screen w-full bg-fin-bg overflow-hidden relative selection:bg-fin-lime selection:text-fin-dark">
