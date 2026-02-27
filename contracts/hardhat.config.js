@@ -24,6 +24,12 @@ module.exports = {
         ? [process.env.PRIVATE_KEY_RELAYER]
         : [],
     },
+    "arc-testnet": {
+      url: "https://rpc.testnet.arc.network",
+      accounts: process.env.PRIVATE_KEY_RELAYER
+        ? [process.env.PRIVATE_KEY_RELAYER]
+        : [],
+    },
     arc: {
       url: process.env.RPC_URL_ARC || "",
       accounts: process.env.PRIVATE_KEY_RELAYER
