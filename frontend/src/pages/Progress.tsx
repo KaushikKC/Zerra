@@ -1,77 +1,145 @@
 import { useParams, useNavigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
-import { CheckCircle2, Circle, Loader2, Sparkles } from 'lucide-react'
+import { useEffect } from 'react'
+import { CheckCircle2, Circle, Loader2, Sparkles, ExternalLink } from 'lucide-react'
+import { usePayment, type JobStatus } from '../hooks/usePayment'
 
-const STEPS = [
-  { id: 'scan', label: 'Wallet scanned', done: true },
-  { id: 'session', label: 'Session key approved', done: true },
-  { id: 'swap', label: 'Swapping on Base', done: false, active: true },
-  { id: 'bridge', label: 'Bridging via CCTP', done: false },
-  { id: 'attestation', label: 'Waiting attestation', done: false },
-  { id: 'pay', label: 'Executing payment on Zerra', done: false },
+// ── Step definitions ──────────────────────────────────────────────────────────
+
+interface Step {
+  id: string
+  label: string
+  activeLabel: string
+  triggeredBy: JobStatus[]   // job statuses that make this step "active"
+  doneAt: JobStatus[]        // job statuses that mark this step "done"
+  txKey?: keyof { swap: unknown; deposit: unknown; transfer: unknown; mint: unknown; pay: unknown }
+  explorerBase?: string
+}
+
+const STEPS: Step[] = [
+  {
+    id: 'scan',
+    label: 'Wallet scanned',
+    activeLabel: 'Scanning balances across chains…',
+    triggeredBy: ['SCANNING'],
+    doneAt: ['ROUTING', 'AWAITING_CONFIRMATION', 'SWAPPING', 'GATEWAY_DEPOSITING', 'GATEWAY_TRANSFERRING', 'MINTING', 'PAYING', 'COMPLETE'],
+  },
+  {
+    id: 'route',
+    label: 'Route calculated',
+    activeLabel: 'Building optimal sourcing plan…',
+    triggeredBy: ['ROUTING', 'AWAITING_CONFIRMATION'],
+    doneAt: ['SWAPPING', 'GATEWAY_DEPOSITING', 'GATEWAY_TRANSFERRING', 'MINTING', 'PAYING', 'COMPLETE'],
+  },
+  {
+    id: 'swap',
+    label: 'Swap on source chain',
+    activeLabel: 'Swapping ETH → USDC via Uniswap…',
+    triggeredBy: ['SWAPPING'],
+    doneAt: ['GATEWAY_DEPOSITING', 'GATEWAY_TRANSFERRING', 'MINTING', 'PAYING', 'COMPLETE'],
+    txKey: 'swap',
+  },
+  {
+    id: 'deposit',
+    label: 'Deposit to Circle Gateway',
+    activeLabel: 'Depositing USDC into Circle Gateway…',
+    triggeredBy: ['GATEWAY_DEPOSITING'],
+    doneAt: ['GATEWAY_TRANSFERRING', 'MINTING', 'PAYING', 'COMPLETE'],
+    txKey: 'deposit',
+  },
+  {
+    id: 'transfer',
+    label: 'Cross-chain transfer',
+    activeLabel: 'Initiating Circle Gateway transfer…',
+    triggeredBy: ['GATEWAY_TRANSFERRING'],
+    doneAt: ['MINTING', 'PAYING', 'COMPLETE'],
+  },
+  {
+    id: 'mint',
+    label: 'Mint USDC on Arc',
+    activeLabel: 'Minting USDC on Arc Testnet…',
+    triggeredBy: ['MINTING'],
+    doneAt: ['PAYING', 'COMPLETE'],
+    txKey: 'mint',
+    explorerBase: 'https://testnet.arcscan.app/tx',
+  },
+  {
+    id: 'pay',
+    label: 'Payment executed on Arc',
+    activeLabel: 'Executing payment via PaymentRouter…',
+    triggeredBy: ['PAYING'],
+    doneAt: ['COMPLETE'],
+    txKey: 'pay',
+    explorerBase: 'https://testnet.arcscan.app/tx',
+  },
 ]
+
+// ── Progress percentage by status ─────────────────────────────────────────────
+
+const STATUS_PROGRESS: Record<JobStatus, number> = {
+  SCANNING: 8,
+  ROUTING: 16,
+  AWAITING_CONFIRMATION: 20,
+  SWAPPING: 35,
+  GATEWAY_DEPOSITING: 50,
+  GATEWAY_TRANSFERRING: 65,
+  MINTING: 80,
+  PAYING: 92,
+  COMPLETE: 100,
+  FAILED: 100,
+}
+
+function getStepState(step: Step, status: JobStatus): 'done' | 'active' | 'pending' {
+  if (step.doneAt.includes(status)) return 'done'
+  if (step.triggeredBy.includes(status)) return 'active'
+  return 'pending'
+}
+
+function getTxHash(txHashes: Record<string, unknown> | null, txKey?: string): string | null {
+  if (!txKey || !txHashes) return null
+  const val = txHashes[txKey]
+  if (!val) return null
+  // If it's an object (per-chain map), just grab the first value
+  if (typeof val === 'object') return Object.values(val as Record<string, string>)[0] ?? null
+  return val as string
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Progress() {
   const { jobId } = useParams<{ jobId: string }>()
   const navigate = useNavigate()
-  const [progress, setProgress] = useState(25)
-  const [steps, setSteps] = useState(STEPS)
+  const { data: job } = usePayment(jobId)
 
+  // Navigate on terminal state
   useEffect(() => {
-    const t1 = setTimeout(() => {
-      setProgress(45)
-      setSteps((s) =>
-        s.map((x) =>
-          x.id === 'swap' ? { ...x, done: true } : x.id === 'bridge' ? { ...x, active: true } : x
-        )
-      )
-    }, 2000)
-    const t2 = setTimeout(() => {
-      setProgress(65)
-      setSteps((s) =>
-        s.map((x) =>
-          x.id === 'bridge' ? { ...x, done: true } : x.id === 'attestation' ? { ...x, active: true } : x
-        )
-      )
-    }, 4500)
-    const t3 = setTimeout(() => {
-      setProgress(85)
-      setSteps((s) =>
-        s.map((x) =>
-          x.id === 'attestation' ? { ...x, done: true } : x.id === 'pay' ? { ...x, active: true } : x
-        )
-      )
-    }, 7000)
-    const t4 = setTimeout(() => {
-      setProgress(100)
-      setSteps((s) => s.map((x) => ({ ...x, done: true, active: false })))
-      navigate(`/success/${jobId}`)
-    }, 9500)
-    return () => {
-      clearTimeout(t1)
-      clearTimeout(t2)
-      clearTimeout(t3)
-      clearTimeout(t4)
-    }
-  }, [jobId, navigate])
+    if (!job) return
+    if (job.status === 'COMPLETE') navigate(`/success/${jobId}`)
+    if (job.status === 'FAILED') navigate(`/failed/${jobId}`)
+  }, [job?.status, jobId, navigate])
+
+  const status: JobStatus = job?.status ?? 'SCANNING'
+  const progress = STATUS_PROGRESS[status] ?? 0
+  const txHashes = job?.txHashes ?? null
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-24 sm:py-40">
       <div className="mb-16">
         <div className="inline-flex items-center gap-3 pill-tag mb-6 border-[#132318]/10">
-          <Sparkles className="w-4 h-4 text-[#132318] animate-pulse" /> <span className="uppercase text-[10px] tracking-[0.2em] font-black">Execution Active</span>
+          <Sparkles className="w-4 h-4 text-[#132318] animate-pulse" />
+          <span className="uppercase text-[10px] tracking-[0.2em] font-black">Execution Active</span>
         </div>
         <h1 className="text-5xl md:text-7xl font-black text-[#132318] tracking-tighter leading-[0.9]">
           Processing...
         </h1>
         <p className="mt-6 text-xl text-[#132318]/60 font-bold max-w-sm leading-relaxed">
-          The Zerra Protocol is orchestrating your liquidity flow across chains.
+          OneClick Pay is orchestrating your liquidity across chains.
         </p>
       </div>
 
       <div className="fin-card !p-12 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-64 h-64 bg-[#E1FF76]/5 rounded-full blur-[80px] -z-10" />
 
+        {/* Progress bar */}
         <div className="mb-20">
           <div className="flex justify-between items-end mb-6">
             <span className="text-[10px] font-black uppercase tracking-[0.3em] text-[#132318]/40">System Progress</span>
@@ -88,54 +156,72 @@ export default function Progress() {
           </div>
           <div className="mt-8 flex justify-center">
             <div className="px-6 py-2 bg-[#E1FF76] rounded-full text-[10px] font-black uppercase tracking-[0.2em] shadow-lg shadow-[#E1FF7633]">
-              Estimated Wait: {Math.max(0, 90 - Math.floor(progress * 0.9))}s
+              Current: {status.replace(/_/g, ' ')}
             </div>
           </div>
         </div>
 
-        {/* Live tracker */}
+        {/* Live step tracker */}
         <div className="space-y-10 relative">
-          {/* Timeline Line */}
           <div className="absolute left-[13px] top-4 bottom-4 w-0.5 bg-[#132318]/[0.05]" />
-
-          {steps.map((step) => (
-            <div key={step.id} className={`flex items-start gap-8 transition-all duration-500 ${step.done ? 'opacity-30' : step.active ? 'opacity-100 scale-105' : 'opacity-40'}`}>
-              <div className="relative z-10 flex flex-col items-center">
-                {step.done ? (
-                  <div className="w-7 h-7 bg-[#132318] rounded-full flex items-center justify-center">
-                    <CheckCircle2 className="w-4 h-4 text-[#E1FF76]" />
-                  </div>
-                ) : step.active ? (
-                  <div className="relative">
-                    <div className="w-7 h-7 bg-[#E1FF76] rounded-full flex items-center justify-center shadow-[0_0_20px_#E1FF76]">
-                      <Loader2 className="w-4 h-4 text-[#132318] animate-spin" />
+          {STEPS.map((step) => {
+            const state = getStepState(step, status)
+            const txHash = getTxHash(txHashes as Record<string, unknown> | null, step.txKey)
+            return (
+              <div
+                key={step.id}
+                className={`flex items-start gap-8 transition-all duration-500 ${
+                  state === 'done' ? 'opacity-30' : state === 'active' ? 'opacity-100 scale-105' : 'opacity-40'
+                }`}
+              >
+                <div className="relative z-10">
+                  {state === 'done' ? (
+                    <div className="w-7 h-7 bg-[#132318] rounded-full flex items-center justify-center">
+                      <CheckCircle2 className="w-4 h-4 text-[#E1FF76]" />
                     </div>
-                    <div className="absolute inset-0 bg-[#E1FF76]/40 animate-ping rounded-full -z-10" />
-                  </div>
-                ) : (
-                  <div className="w-7 h-7 bg-white border-2 border-[#132318]/10 rounded-full flex items-center justify-center">
-                    <Circle className="w-3 h-3 text-[#132318]/20" />
-                  </div>
-                )}
+                  ) : state === 'active' ? (
+                    <div className="relative">
+                      <div className="w-7 h-7 bg-[#E1FF76] rounded-full flex items-center justify-center shadow-[0_0_20px_#E1FF76]">
+                        <Loader2 className="w-4 h-4 text-[#132318] animate-spin" />
+                      </div>
+                      <div className="absolute inset-0 bg-[#E1FF76]/40 animate-ping rounded-full -z-10" />
+                    </div>
+                  ) : (
+                    <div className="w-7 h-7 bg-white border-2 border-[#132318]/10 rounded-full flex items-center justify-center">
+                      <Circle className="w-3 h-3 text-[#132318]/20" />
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className={`text-xl font-black leading-none mb-2 tracking-tight ${state === 'active' ? 'text-[#132318]' : 'text-[#132318]/60'}`}>
+                    {step.label}
+                  </h3>
+                  {state === 'active' && (
+                    <p className="text-[10px] font-black text-[#132318]/40 uppercase tracking-widest animate-pulse italic">
+                      {step.activeLabel}
+                    </p>
+                  )}
+                  {txHash && step.explorerBase && (
+                    <a
+                      href={`${step.explorerBase}/${txHash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 mt-2 text-[10px] font-black text-[#132318]/40 hover:text-[#132318] uppercase tracking-widest transition-colors"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      {txHash.slice(0, 10)}…{txHash.slice(-6)}
+                    </a>
+                  )}
+                </div>
               </div>
-              <div>
-                <h3 className={`text-xl font-black leading-none mb-2 tracking-tight ${step.active ? 'text-[#132318]' : 'text-[#132318]/60'}`}>
-                  {step.label}
-                </h3>
-                {step.active && (
-                  <p className="text-[10px] font-black text-[#132318]/40 uppercase tracking-widest animate-pulse italic">
-                    Verifying on-chain state...
-                  </p>
-                )}
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
 
       <div className="mt-20 text-center">
         <p className="text-xs font-black uppercase tracking-[0.5em] text-[#132318]/20 leading-relaxed max-w-xs mx-auto">
-          One atomic signature. Orchestrating across 12 nodes.
+          One signature. Settling on Arc Network.
         </p>
       </div>
     </div>
