@@ -1,0 +1,14 @@
+{
+  "name": "arc-defi-contracts",
+  "version": "1.0.0",
+  "description": "Arc DeFi smart contracts",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy": "hardhat run scripts/deploy.js"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.22.0"
+  }
+}
