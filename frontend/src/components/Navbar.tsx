@@ -23,20 +23,28 @@ export default function Navbar() {
               Zerra
             </span>
           </Link>
-          {isConnected && (
-            <nav className="hidden sm:flex items-center gap-2">
+          <nav className="hidden sm:flex items-center gap-2">
+            {isConnected && (
               <Link
                 to="/merchant"
-                className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
-                  location.pathname === "/merchant"
-                    ? "bg-fin-dark text-white"
-                    : "text-black/60 hover:text-black hover:bg-black/5"
-                }`}
+                className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${location.pathname === "/merchant"
+                  ? "bg-fin-dark text-white"
+                  : "text-black/60 hover:text-black hover:bg-black/5"
+                  }`}
               >
                 Dashboard
               </Link>
-            </nav>
-          )}
+            )}
+            <Link
+              to="/pitch"
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${location.pathname === "/pitch"
+                ? "bg-fin-dark text-white"
+                : "text-black/60 hover:text-black hover:bg-black/5"
+                }`}
+            >
+              Pitch
+            </Link>
+          </nav>
         </div>
 
         <ConnectButton

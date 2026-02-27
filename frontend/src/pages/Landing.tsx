@@ -179,6 +179,7 @@ export default function Landing() {
               <ul className="space-y-4 font-bold text-[#132318]/60">
                 <li><a href="#" className="hover:text-[#132318]">Explorer</a></li>
                 <li><a href="#" className="hover:text-[#132318]">Documentation</a></li>
+                <li><Link to="/pitch" className="hover:text-[#132318]">Pitch Deck</Link></li>
                 <li><a href="#" className="hover:text-[#132318]">Protocols</a></li>
               </ul>
             </div>
