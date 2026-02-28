@@ -399,7 +399,13 @@ async function stepBridge(jobId) {
     const amount = step.type === "swap" ? (step.toUsdc ?? "0") : step.amount;
 
     console.log(`[orchestrator:${jobId}] Bridge ${i + 1}/${bridgeSteps.length}: ${amount} USDC from ${step.chain} → Arc`);
-    const destAddress = await bridgeUsdcToArc(privateKey, step.chain, amount);
+    const BRIDGE_TIMEOUT_MS = 25 * 60 * 1000; // 25 minutes
+    const destAddress = await Promise.race([
+      bridgeUsdcToArc(privateKey, step.chain, amount),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Bridge timed out after 25 minutes")), BRIDGE_TIMEOUT_MS)
+      ),
+    ]);
     console.log(`[orchestrator:${jobId}] Bridge ${i + 1}/${bridgeSteps.length} done — USDC at ${destAddress} on Arc`);
   }
 

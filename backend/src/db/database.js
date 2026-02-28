@@ -59,6 +59,9 @@ if (usePg) {
     updateWebhookDelivery: wrapSync(sqlite.updateWebhookDelivery),
     getWebhookDelivery: wrapSync(sqlite.getWebhookDelivery),
     getMerchantWebhookDeliveries: wrapSync(sqlite.getMerchantWebhookDeliveries),
+    getPlatformStats: wrapSync(sqlite.getPlatformStats),
+    findStuckJobs: wrapSync(sqlite.findStuckJobs),
+    getTreasuryPayouts: wrapSync(sqlite.getTreasuryPayouts),
   };
   if (process.env.NODE_ENV !== "test") {
     console.log("[db] Using local SQLite (data/arc.db)");
@@ -103,6 +106,9 @@ export const saveWebhookDelivery = api.saveWebhookDelivery;
 export const updateWebhookDelivery = api.updateWebhookDelivery;
 export const getWebhookDelivery = api.getWebhookDelivery;
 export const getMerchantWebhookDeliveries = api.getMerchantWebhookDeliveries;
+export const getPlatformStats = api.getPlatformStats;
+export const findStuckJobs = api.findStuckJobs;
+export const getTreasuryPayouts = api.getTreasuryPayouts;
 
 // Default export: SQLite exposes the db instance; Postgres has no raw client.
 export default usePg ? {} : (await import("./database-sqlite.js")).default;

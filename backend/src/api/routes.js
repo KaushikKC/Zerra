@@ -1,13 +1,17 @@
 import { Router } from "express";
-import { encodeFunctionData, parseUnits, parseEther } from "viem";
+import { encodeFunctionData, parseUnits, parseEther, createWalletClient, http, formatUnits } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 import { scanBalances } from "../scanner/balanceScanner.js";
 import { getQuote } from "../router/quoteEngine.js";
-import { generateSessionKey, encryptKey } from "../aa/sessionKeys.js";
+import { generateSessionKey, encryptKey, decryptKey } from "../aa/sessionKeys.js";
 import {
   saveSessionKey,
   getSessionKey,
+  deleteSessionKey,
   getJob,
   getMerchantWebhookDeliveries,
+  getPlatformStats,
+  getTreasuryPayouts,
 } from "../db/database.js";
 import {
   createPaymentJob,
@@ -36,6 +40,7 @@ import {
 } from "../subscriptions/subscriptions.js";
 import { dispatchTestWebhook } from "../webhooks/webhookDispatcher.js";
 import { config } from "../config/networks.js";
+import { requireMerchantAuth } from "./authMiddleware.js";
 
 const router = Router();
 
@@ -199,6 +204,7 @@ router.get("/pay/:jobId/receipt", async (req, res) => {
     label: job.label,
     merchantReceives: job.quote?.merchantReceives ?? null,
     txHash: job.tx_hashes?.pay ?? null,
+    sourcePlan: job.source_plan ?? null,
     expiresAt: job.expires_at,
     createdAt: job.created_at,
   });
@@ -252,9 +258,20 @@ router.get("/payment-link/verify", (req, res) => {
   res.json(result);
 });
 
+// ── GET /api/stats ────────────────────────────────────────────────────────────
+
+router.get("/stats", async (_req, res) => {
+  try {
+    const stats = await getPlatformStats();
+    res.json(stats);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /api/merchant/register ───────────────────────────────────────────────
 
-router.post("/merchant/register", async (req, res) => {
+router.post("/merchant/register", requireMerchantAuth, async (req, res) => {
   const { walletAddress, displayName, logoUrl } = req.body;
   if (!walletAddress || !displayName) {
     return res.status(400).json({ error: "walletAddress and displayName are required" });
@@ -295,7 +312,7 @@ router.get("/merchant/:walletAddress/payments", async (req, res) => {
 
 // ── POST /api/merchant/split ──────────────────────────────────────────────────
 
-router.post("/merchant/split", async (req, res) => {
+router.post("/merchant/split", requireMerchantAuth, async (req, res) => {
   const { walletAddress, splits } = req.body;
   if (!walletAddress || !splits) {
     return res.status(400).json({ error: "walletAddress and splits are required" });
@@ -322,7 +339,7 @@ router.get("/merchant/:address/split", async (req, res) => {
 
 // ── POST /api/merchant/webhook ────────────────────────────────────────────────
 
-router.post("/merchant/webhook", async (req, res) => {
+router.post("/merchant/webhook", requireMerchantAuth, async (req, res) => {
   const { walletAddress, webhookUrl } = req.body;
   if (!walletAddress || !webhookUrl) {
     return res.status(400).json({ error: "walletAddress and webhookUrl are required" });
@@ -369,7 +386,7 @@ router.get("/merchant/:address/webhooks", async (req, res) => {
 
 // ── POST /api/storefront/slug ─────────────────────────────────────────────────
 
-router.post("/storefront/slug", async (req, res) => {
+router.post("/storefront/slug", requireMerchantAuth, async (req, res) => {
   const { walletAddress, slug } = req.body;
   if (!walletAddress || !slug) {
     return res.status(400).json({ error: "walletAddress and slug are required" });
@@ -411,7 +428,7 @@ router.get("/storefront/:slug", async (req, res) => {
 
 // ── POST /api/storefront/product ──────────────────────────────────────────────
 
-router.post("/storefront/product", async (req, res) => {
+router.post("/storefront/product", requireMerchantAuth, async (req, res) => {
   const { merchantAddress, name, description, price, imageUrl, sortOrder, type, intervalDays } = req.body;
   if (!merchantAddress || !name || !price) {
     return res.status(400).json({ error: "merchantAddress, name, and price are required" });
@@ -427,7 +444,7 @@ router.post("/storefront/product", async (req, res) => {
 
 // ── PUT /api/storefront/product/:id ──────────────────────────────────────────
 
-router.put("/storefront/product/:id", async (req, res) => {
+router.put("/storefront/product/:id", requireMerchantAuth, async (req, res) => {
   const { merchantAddress, name, description, price, imageUrl, sortOrder, type, intervalDays } = req.body;
   if (!merchantAddress) {
     return res.status(400).json({ error: "merchantAddress is required" });
@@ -443,7 +460,7 @@ router.put("/storefront/product/:id", async (req, res) => {
 
 // ── DELETE /api/storefront/product/:id ───────────────────────────────────────
 
-router.delete("/storefront/product/:id", async (req, res) => {
+router.delete("/storefront/product/:id", requireMerchantAuth, async (req, res) => {
   const { merchantAddress } = req.body;
   if (!merchantAddress) {
     return res.status(400).json({ error: "merchantAddress is required" });
@@ -551,6 +568,230 @@ router.get("/subscriptions/payer/:address", async (req, res) => {
   try {
     const subs = await getPayerSubscriptions(req.params.address);
     res.json({ subscriptions: subs.map(({ encrypted_session_key, ...safe }) => safe) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/merchant/:address/analytics ─────────────────────────────────────
+
+const CHAIN_LABELS = {
+  "arc-testnet": "Arc Testnet",
+  "ethereum-sepolia": "Ethereum Sepolia",
+  "base-sepolia": "Base Sepolia",
+  ethereum: "Ethereum",
+  base: "Base",
+};
+
+router.get("/merchant/:address/analytics", async (req, res) => {
+  try {
+    const payments = await getMerchantAllPayments(req.params.address, 1000, 0);
+    const completed = payments.filter((p) => p.status === "COMPLETE");
+
+    let totalUsdcReceived = 0;
+    const chainMap = {};
+    const now = Date.now();
+    const dayAgo = now - 24 * 60 * 60 * 1000;
+    const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+    let todayVolume = 0;
+    let weekVolume = 0;
+
+    for (const job of completed) {
+      const amount = parseFloat(job.quote?.merchantReceives ?? job.target_amount) || 0;
+      totalUsdcReceived += amount;
+      if (job.created_at > dayAgo) todayVolume += amount;
+      if (job.created_at > weekAgo) weekVolume += amount;
+
+      for (const step of job.source_plan ?? []) {
+        if (!step.chain) continue;
+        if (!chainMap[step.chain]) {
+          chainMap[step.chain] = { label: CHAIN_LABELS[step.chain] ?? step.chain, totalUsdc: 0, count: 0 };
+        }
+        const stepAmt = parseFloat(step.type === "swap" ? (step.toUsdc ?? "0") : step.amount) || 0;
+        chainMap[step.chain].totalUsdc += stepAmt;
+        chainMap[step.chain].count++;
+      }
+    }
+
+    const chainBreakdown = Object.entries(chainMap)
+      .map(([chain, d]) => ({
+        chain,
+        label: d.label,
+        totalUsdc: d.totalUsdc.toFixed(2),
+        count: d.count,
+        pct: totalUsdcReceived > 0 ? Math.round((d.totalUsdc / totalUsdcReceived) * 100) : 0,
+      }))
+      .sort((a, b) => parseFloat(b.totalUsdc) - parseFloat(a.totalUsdc));
+
+    res.json({
+      totalPayments: completed.length,
+      totalUsdcReceived: totalUsdcReceived.toFixed(2),
+      chainsAbstracted: Object.keys(chainMap).length,
+      chainBreakdown,
+      recentVolume: {
+        today: todayVolume.toFixed(2),
+        week: weekVolume.toFixed(2),
+        allTime: totalUsdcReceived.toFixed(2),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/session/refund ──────────────────────────────────────────────────
+
+const ERC20_TRANSFER_ABI_REFUND = [
+  {
+    name: "transfer",
+    type: "function",
+    inputs: [{ name: "to", type: "address" }, { name: "amount", type: "uint256" }],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    name: "balanceOf",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+];
+
+router.post("/session/refund", async (req, res) => {
+  const { walletAddress } = req.body;
+  if (!walletAddress) {
+    return res.status(400).json({ error: "walletAddress is required" });
+  }
+
+  try {
+    const sessionKeyRow = await getSessionKey(walletAddress);
+    if (!sessionKeyRow) {
+      return res.status(404).json({ error: "No session key found for this wallet" });
+    }
+
+    const privateKey = decryptKey(sessionKeyRow.encrypted_private_key);
+    const account = privateKeyToAccount(privateKey);
+    const sessionAddress = sessionKeyRow.session_address;
+
+    const refunded = [];
+
+    for (const chain of config.sourceChains) {
+      if (!chain.rpcUrl) continue;
+      const viemChain = {
+        id: chain.chainId,
+        name: chain.name,
+        nativeCurrency: { decimals: chain.gasIsUsdc ? 6 : 18, name: chain.nativeSymbol, symbol: chain.nativeSymbol },
+        rpcUrls: { default: { http: [chain.rpcUrl] } },
+      };
+
+      try {
+        const { createPublicClient } = await import("viem");
+        const publicClient = createPublicClient({ chain: viemChain, transport: http(chain.rpcUrl) });
+        const usdcRaw = await publicClient.readContract({
+          address: chain.usdcAddress,
+          abi: ERC20_TRANSFER_ABI_REFUND,
+          functionName: "balanceOf",
+          args: [sessionAddress],
+        });
+
+        if (usdcRaw === 0n) continue;
+
+        const walletClient = createWalletClient({ account, chain: viemChain, transport: http(chain.rpcUrl) });
+        const data = encodeFunctionData({
+          abi: ERC20_TRANSFER_ABI_REFUND,
+          functionName: "transfer",
+          args: [walletAddress, usdcRaw],
+        });
+        const hash = await walletClient.sendTransaction({
+          to: chain.usdcAddress,
+          data,
+          ...(chain.gasIsUsdc ? {} : {}),
+        });
+        refunded.push({ chain: chain.key, amount: formatUnits(usdcRaw, 6), txHash: hash });
+      } catch (chainErr) {
+        console.warn(`[refund] Could not refund on ${chain.key}: ${chainErr.message}`);
+      }
+    }
+
+    // Clean up session key
+    await deleteSessionKey(walletAddress);
+
+    res.json({ refunded });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/treasury/payout ─────────────────────────────────────────────────
+// Creates session key on Arc + payment jobs for each recipient (Arc-direct).
+// Returns { sessionAddress, fundTx, jobIds } — merchant signs fundTx then
+// calls POST /api/pay/:jobId/confirm for each jobId.
+
+router.post("/treasury/payout", requireMerchantAuth, async (req, res) => {
+  const { fromMerchant, recipients } = req.body;
+  if (!fromMerchant || !Array.isArray(recipients) || recipients.length === 0) {
+    return res.status(400).json({ error: "fromMerchant and recipients[] are required" });
+  }
+
+  const totalUsdc = recipients.reduce((s, r) => s + parseFloat(r.amount || 0), 0);
+  if (totalUsdc <= 0) {
+    return res.status(400).json({ error: "Total payout amount must be > 0" });
+  }
+
+  try {
+    const { privateKey, address: sessionAddress } = generateSessionKey();
+    const encryptedKey = encryptKey(privateKey);
+    const expiry = Math.floor(Date.now() / 1000) + 3600;
+
+    // Store with sessionAddress as the key (needed for orchestrator lookup)
+    await saveSessionKey({
+      wallet_address: sessionAddress,
+      encrypted_private_key: encryptedKey,
+      session_address: sessionAddress,
+      allowed_contracts: [],
+      spend_limit: totalUsdc.toFixed(6),
+      expiry,
+    });
+
+    // One fund tx: transfer total USDC to session EOA on Arc
+    const arcChain = config.sourceChains.find((c) => c.isDirect);
+    const fundData = encodeFunctionData({
+      abi: ERC20_TRANSFER_ABI,
+      functionName: "transfer",
+      args: [sessionAddress, parseUnits(totalUsdc.toFixed(6), 6)],
+    });
+    const fundTx = {
+      chainId: arcChain.chainId,
+      to: arcChain.usdcAddress,
+      data: fundData,
+      value: "0",
+    };
+
+    // Create one Arc-direct job per recipient (AWAITING_CONFIRMATION)
+    const jobIds = [];
+    for (const r of recipients) {
+      const jobId = await createPaymentJob({
+        payerAddress: sessionAddress,
+        merchantAddress: r.address,
+        targetAmount: String(r.amount),
+        label: r.label ?? null,
+        paymentRef: `treasury:${fromMerchant}`,
+      });
+      jobIds.push(jobId);
+    }
+
+    res.json({ sessionAddress, fundTx, jobIds });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/treasury/payouts/:merchantAddress ────────────────────────────────
+
+router.get("/treasury/payouts/:merchantAddress", async (req, res) => {
+  try {
+    const payouts = await getTreasuryPayouts(req.params.merchantAddress, 50);
+    res.json({ payouts });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

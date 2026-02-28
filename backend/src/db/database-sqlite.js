@@ -640,4 +640,60 @@ export function getMerchantWebhookDeliveries(merchantAddress, limit = 20) {
   return stmts.getMerchantWebhookDeliveries.all(merchantAddress, limit);
 }
 
+// ── Platform stats (all merchants) ───────────────────────────────────────────
+
+export function getPlatformStats() {
+  const jobs = db.prepare(`SELECT target_amount, source_plan FROM payment_jobs WHERE status = 'COMPLETE'`).all();
+  let totalUsdc = 0;
+  const chainSet = new Set();
+  for (const job of jobs) {
+    totalUsdc += parseFloat(job.target_amount) || 0;
+    if (job.source_plan) {
+      try {
+        for (const step of JSON.parse(job.source_plan)) {
+          if (step.chain) chainSet.add(step.chain);
+        }
+      } catch { /* ignore malformed */ }
+    }
+  }
+  const merchantCount = db.prepare(`SELECT COUNT(*) as n FROM merchants`).get().n;
+  return {
+    totalPayments: jobs.length,
+    totalUsdcSettled: totalUsdc.toFixed(2),
+    chainsAbstracted: chainSet.size,
+    merchantCount,
+  };
+}
+
+// ── Stuck job recovery ────────────────────────────────────────────────────────
+
+const findStuckJobsStmt = db.prepare(`
+  SELECT id FROM payment_jobs
+  WHERE status IN ('BRIDGING','SWAPPING')
+    AND updated_at < ?
+  LIMIT 20
+`);
+
+export function findStuckJobs() {
+  const cutoff = Date.now() - 30 * 60 * 1000;
+  return findStuckJobsStmt.all(cutoff);
+}
+
+// ── Treasury payout queries ───────────────────────────────────────────────────
+
+const getTreasuryPayoutsStmt = db.prepare(`
+  SELECT * FROM payment_jobs
+  WHERE payment_ref = 'treasury:' || ?
+  ORDER BY created_at DESC
+  LIMIT ?
+`);
+
+export function getTreasuryPayouts(merchantAddress, limit = 50) {
+  return getTreasuryPayoutsStmt.all(merchantAddress, limit).map((row) => {
+    if (row.tx_hashes) row.tx_hashes = JSON.parse(row.tx_hashes);
+    if (row.quote) row.quote = JSON.parse(row.quote);
+    return row;
+  });
+}
+
 export default db;

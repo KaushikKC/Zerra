@@ -3,7 +3,7 @@ import express from "express";
 import cors from "cors";
 import apiRoutes from "./api/routes.js";
 import { getGatewayInfo } from "./bridge/gatewayBridge.js";
-import { expireStaleJobs } from "./db/database.js";
+import { expireStaleJobs, findStuckJobs, updateJobStatus } from "./db/database.js";
 import { tickSubscriptions } from "./subscriptions/subscriptions.js";
 import { seedDemoData } from "./db/seed.js";
 
@@ -57,6 +57,19 @@ app.listen(PORT, async () => {
   setInterval(async () => {
     const n = await expireStaleJobs();
     if (n > 0) console.log(`[scheduler] Expired ${n} stale job(s)`);
+  }, 5 * 60 * 1000);
+
+  // Recover stuck jobs (BRIDGING/SWAPPING > 30 min) every 5 minutes
+  setInterval(async () => {
+    try {
+      const stuck = await findStuckJobs();
+      for (const { id } of stuck) {
+        await updateJobStatus(id, "FAILED", { error: "Job timed out (stuck in processing)" });
+        console.log(`[scheduler] Marked stuck job ${id} as FAILED`);
+      }
+    } catch (err) {
+      console.error("[scheduler] Stuck-job recovery error:", err.message);
+    }
   }, 5 * 60 * 1000);
 
   // Charge due subscriptions every 60 seconds
