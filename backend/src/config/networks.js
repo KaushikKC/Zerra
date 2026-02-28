@@ -9,6 +9,23 @@ const TESTNET = {
   // ── Source chains ─────────────────────────────────────────────────────────
 
   sourceChains: [
+    // ── Arc Testnet (direct — payer already on Arc, no bridge needed) ──────────
+    // When the payer holds Arc-testnet USDC, this path is used: session key EOA
+    // calls approve + pay directly on Arc, skipping Circle Gateway entirely.
+    {
+      key: "arc-testnet",
+      name: "Arc Testnet",
+      chainId: 5042002,
+      domain: 26,
+      rpcUrl: "https://rpc.testnet.arc.network",
+      usdcAddress: "0x3600000000000000000000000000000000000000",
+      hasSwap: false,
+      nativeSymbol: "USDC",
+      blockExplorer: "https://testnet.arcscan.app",
+      pimlicoChainName: null,   // no Pimlico needed for direct EOA payments
+      gasIsUsdc: true,          // USDC is the native gas token on Arc
+      isDirect: true,           // no bridging — payer is already on the destination chain
+    },
     {
       key: "ethereum-sepolia",
       name: "Ethereum Sepolia",

@@ -88,15 +88,33 @@ router.post("/session/create", async (req, res) => {
     const encryptedKey = encryptKey(privateKey);
     const expiry = Math.floor(Date.now() / 1000) + expirySeconds;
 
-    // Derive the counterfactual SimpleSmartAccount address for this session key.
-    // SimpleSmartAccount uses CREATE2 with a canonical factory — same address on all chains.
-    const primaryChain = config.sourceChains[0];
-    const smartAccountAddress = await getSmartAccountAddressForKey(privateKey, primaryChain);
+    // Check if all steps are Arc-direct (isDirect: true).
+    // Arc-direct: session key EOA is both the funded account and the payer.
+    // Cross-chain: smart account is the payer (funded by the EOA, operated via ERC-4337).
+    const plan =
+      sourcePlan && sourcePlan.length > 0
+        ? sourcePlan
+        : [{ chain: config.sourceChains.find((c) => !c.isDirect)?.key ?? config.sourceChains[0].key, type: "usdc", amount: spendLimitUsdc }];
 
-    // Index the session key by smartAccountAddress so the orchestrator can look it
-    // up via getSessionKey(job.payer_address) where payer_address = smartAccountAddress.
+    const isDirectPlan = plan.every((step) => {
+      const chainConfig = config.sourceChains.find((c) => c.key === step.chain);
+      return !!chainConfig?.isDirect;
+    });
+
+    // For Arc-direct: lookup key = sessionAddress (the EOA that holds USDC on Arc)
+    // For cross-chain: lookup key = smartAccountAddress (the ERC-4337 smart account)
+    let smartAccountAddress = sessionAddress; // default for Arc-direct
+    if (!isDirectPlan) {
+      const primaryChain = config.sourceChains.find((c) => !c.isDirect) ?? config.sourceChains[0];
+      smartAccountAddress = await getSmartAccountAddressForKey(privateKey, primaryChain);
+    }
+
+    const payerAddress = isDirectPlan ? sessionAddress : smartAccountAddress;
+
+    // Index the session key so the orchestrator can look it up via
+    // getSessionKey(job.payer_address).
     saveSessionKey({
-      wallet_address: smartAccountAddress,
+      wallet_address: payerAddress,
       encrypted_private_key: encryptedKey,
       session_address: sessionAddress,
       allowed_contracts: [],
@@ -104,33 +122,28 @@ router.post("/session/create", async (req, res) => {
       expiry,
     });
 
-    // Build one fund transaction per source-plan step.
-    // The user transfers their assets (USDC or native ETH) from their EOA into the
-    // smart account.  The backend then operates the smart account autonomously.
-    const plan =
-      sourcePlan && sourcePlan.length > 0
-        ? sourcePlan
-        : [{ chain: primaryChain.key, type: "usdc", amount: spendLimitUsdc }];
-
+    // Build fund transactions — user transfers assets from their EOA to the
+    // executing account (session key EOA for Arc-direct, smart account for cross-chain).
     const fundTxes = [];
     for (const step of plan) {
       const chainConfig = config.sourceChains.find((c) => c.key === step.chain);
       if (!chainConfig) continue;
 
+      // Arc-direct: fund the session key EOA. Cross-chain: fund the smart account.
+      const recipient = chainConfig.isDirect ? sessionAddress : smartAccountAddress;
+
       if (step.type === "swap") {
-        // User holds native ETH that the smart account will swap to USDC
         fundTxes.push({
           chainId: chainConfig.chainId,
-          to: smartAccountAddress,
+          to: recipient,
           data: "0x",
           value: parseEther(String(step.fromAmount)).toString(),
         });
       } else {
-        // User holds USDC directly — transfer it to the smart account
         const data = encodeFunctionData({
           abi: ERC20_TRANSFER_ABI,
           functionName: "transfer",
-          args: [smartAccountAddress, parseUnits(String(step.amount), 6)],
+          args: [recipient, parseUnits(String(step.amount), 6)],
         });
         fundTxes.push({
           chainId: chainConfig.chainId,
@@ -141,7 +154,7 @@ router.post("/session/create", async (req, res) => {
       }
     }
 
-    res.json({ sessionAddress, smartAccountAddress, expiry, fundTxes });
+    res.json({ sessionAddress, smartAccountAddress, payerAddress, expiry, fundTxes });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -395,13 +408,13 @@ router.get("/storefront/:slug", (req, res) => {
 // ── POST /api/storefront/product ──────────────────────────────────────────────
 
 router.post("/storefront/product", (req, res) => {
-  const { merchantAddress, name, description, price, imageUrl, sortOrder } = req.body;
+  const { merchantAddress, name, description, price, imageUrl, sortOrder, type, intervalDays } = req.body;
   if (!merchantAddress || !name || !price) {
     return res.status(400).json({ error: "merchantAddress, name, and price are required" });
   }
 
   try {
-    const id = upsertProduct(merchantAddress, { name, description, price, imageUrl, sortOrder });
+    const id = upsertProduct(merchantAddress, { name, description, price, imageUrl, sortOrder, type, intervalDays });
     res.status(201).json({ id });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -411,13 +424,13 @@ router.post("/storefront/product", (req, res) => {
 // ── PUT /api/storefront/product/:id ──────────────────────────────────────────
 
 router.put("/storefront/product/:id", (req, res) => {
-  const { merchantAddress, name, description, price, imageUrl, sortOrder } = req.body;
+  const { merchantAddress, name, description, price, imageUrl, sortOrder, type, intervalDays } = req.body;
   if (!merchantAddress) {
     return res.status(400).json({ error: "merchantAddress is required" });
   }
 
   try {
-    upsertProduct(merchantAddress, { id: req.params.id, name, description, price, imageUrl, sortOrder });
+    upsertProduct(merchantAddress, { id: req.params.id, name, description, price, imageUrl, sortOrder, type, intervalDays });
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err.message });

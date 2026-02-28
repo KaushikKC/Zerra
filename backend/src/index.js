@@ -5,6 +5,7 @@ import apiRoutes from "./api/routes.js";
 import { getGatewayInfo } from "./bridge/gatewayBridge.js";
 import { expireStaleJobs } from "./db/database.js";
 import { tickSubscriptions } from "./subscriptions/subscriptions.js";
+import { seedDemoData } from "./db/seed.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -28,6 +29,13 @@ app.listen(PORT, async () => {
     console.log("Gateway contracts cached:", Object.keys(contracts).length, "chains");
   } catch (err) {
     console.warn("Could not pre-fetch Gateway info (will retry on first use):", err.message);
+  }
+
+  // Seed demo storefront data (idempotent — skips if already seeded)
+  try {
+    await seedDemoData();
+  } catch (err) {
+    console.warn("[seed] Demo data seed failed (non-fatal):", err.message);
   }
 
   // Expire stale payment jobs on startup

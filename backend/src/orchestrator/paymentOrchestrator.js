@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
-import { encodeFunctionData, parseUnits, keccak256, toHex } from "viem";
+import { encodeFunctionData, parseUnits, keccak256, toHex, createPublicClient, createWalletClient, http } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 import {
   createJob,
   updateJobStatus,
@@ -237,7 +238,18 @@ async function stepRoute(jobId, opts = {}) {
     userAuthorizes: quote.userAuthorizes,
     merchantReceives: quote.merchantReceives,
     breakdown: quote.breakdown,
+    isDirect: quote.isDirect ?? false,
   };
+
+  // ── Arc-direct shortcut ──────────────────────────────────────────────────────
+  // Payer already has USDC on Arc — skip the entire bridge chain and go straight
+  // to PAYING where the session key EOA executes approve + pay as plain EOA txs.
+  if (quote.isDirect) {
+    updateJobStatus(jobId, "PAYING", { source_plan: quote.sourcePlan, quote: quoteData });
+    console.log(`[orchestrator:${jobId}] Arc-direct path — skipping bridge, going straight to PAYING`);
+    await stepPay(jobId);
+    return;
+  }
 
   if (opts.skipConfirmation) {
     // For subscription auto-charges, skip AWAITING_CONFIRMATION
@@ -465,8 +477,97 @@ async function stepMint(jobId) {
 
 // ── State: PAYING ─────────────────────────────────────────────────────────────
 
+// ── State: PAYING (Arc-direct — session key EOA, no ERC-4337) ────────────────
+
+/**
+ * Arc-direct payment: the session key EOA holds USDC on Arc and calls
+ * PaymentRouter directly as a plain EOA transaction (no Pimlico/ERC-4337).
+ * USDC is Arc's native gas token, so the EOA pays gas from the same balance.
+ */
+async function stepDirectArcPay(jobId) {
+  const job = getJob(jobId);
+  console.log(`[orchestrator:${jobId}] PAYING (Arc-direct EOA)`);
+
+  const routerAddress = process.env.PAYMENT_ROUTER_ADDRESS;
+  if (!routerAddress) throw new Error("PAYMENT_ROUTER_ADDRESS not set");
+
+  const sessionKeyRow = getSessionKey(job.payer_address);
+  if (!sessionKeyRow) throw new Error("Session key not found for payer");
+
+  const privateKey = decryptKey(sessionKeyRow.encrypted_private_key);
+  const account = privateKeyToAccount(privateKey);
+
+  // Arc Testnet: USDC is the native gas token (decimals 6)
+  const arcChain = {
+    id: config.destinationChain.chainId,
+    name: config.destinationChain.name,
+    nativeCurrency: { decimals: 6, name: "USDC", symbol: "USDC" },
+    rpcUrls: { default: { http: [config.destinationChain.rpcUrl] } },
+  };
+
+  const publicClient = createPublicClient({ chain: arcChain, transport: http(config.destinationChain.rpcUrl) });
+  const walletClient = createWalletClient({ account, chain: arcChain, transport: http(config.destinationChain.rpcUrl) });
+
+  const grossAmount = parseUnits(job.quote.merchantReceives, USDC_DECIMALS);
+  const paymentRef = job.payment_ref
+    ? keccak256(toHex(job.payment_ref))
+    : `0x${"00".repeat(32)}`;
+
+  const usdcAddress = config.destinationChain.usdcAddress;
+
+  // Step 1: approve PaymentRouter to spend grossAmount
+  console.log(`[orchestrator:${jobId}] Arc-direct: approving ${job.quote.merchantReceives} USDC to PaymentRouter...`);
+  const approveHash = await walletClient.writeContract({
+    address: usdcAddress,
+    abi: PAYMENT_ROUTER_ABI,
+    functionName: "approve",
+    args: [routerAddress, grossAmount],
+  });
+  await publicClient.waitForTransactionReceipt({ hash: approveHash });
+  console.log(`[orchestrator:${jobId}] Arc-direct approve confirmed: ${approveHash}`);
+
+  // Step 2: pay (or splitPay)
+  const splitConfig = getSplitConfig(job.merchant_address);
+  let payHash;
+  if (splitConfig && splitConfig.length > 0) {
+    payHash = await walletClient.writeContract({
+      address: routerAddress,
+      abi: PAYMENT_ROUTER_ABI,
+      functionName: "splitPay",
+      args: [splitConfig.map((s) => s.address), splitConfig.map((s) => BigInt(s.bps)), grossAmount, paymentRef],
+    });
+  } else {
+    payHash = await walletClient.writeContract({
+      address: routerAddress,
+      abi: PAYMENT_ROUTER_ABI,
+      functionName: "pay",
+      args: [job.merchant_address, grossAmount, paymentRef],
+    });
+  }
+  await publicClient.waitForTransactionReceipt({ hash: payHash });
+
+  updateJobTxHash(jobId, { pay: payHash });
+  updateJobStatus(jobId, "COMPLETE");
+  console.log(`[orchestrator:${jobId}] COMPLETE (Arc-direct) — tx: ${payHash}`);
+
+  // Dispatch webhook async (never fails the job)
+  const completedJob = getJob(jobId);
+  dispatchWebhook(completedJob).catch((err) => {
+    console.error(`[orchestrator:${jobId}] Webhook dispatch error:`, err.message);
+  });
+}
+
+// ── State: PAYING (cross-chain — smart account via ERC-4337) ─────────────────
+
 async function stepPay(jobId) {
   const job = getJob(jobId);
+
+  // Arc-direct path: payer was already on Arc, session key EOA executes directly
+  if (job.quote?.isDirect || job.source_plan?.some((s) => s.isDirect)) {
+    await stepDirectArcPay(jobId);
+    return;
+  }
+
   console.log(`[orchestrator:${jobId}] PAYING merchant on Arc`);
 
   const routerAddress = process.env.PAYMENT_ROUTER_ADDRESS;

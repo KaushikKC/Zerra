@@ -49,6 +49,8 @@ export function upsertProduct(merchantAddress, product) {
       price: product.price,
       image_url: product.imageUrl,
       sort_order: product.sortOrder,
+      type: product.type,
+      interval_days: product.intervalDays ?? null,
     });
     return product.id;
   } else {
@@ -62,6 +64,8 @@ export function upsertProduct(merchantAddress, product) {
       price: product.price,
       image_url: product.imageUrl ?? null,
       sort_order: product.sortOrder ?? 0,
+      type: product.type ?? "one_time",
+      interval_days: product.intervalDays ?? null,
     });
     return id;
   }
@@ -99,6 +103,8 @@ export function getStorefront(slug) {
       price: p.price,
       imageUrl: p.image_url ?? null,
       sortOrder: p.sort_order,
+      type: p.type ?? "one_time",
+      intervalDays: p.interval_days ?? null,
     })),
   };
 }

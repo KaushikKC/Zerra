@@ -107,6 +107,8 @@ for (const sql of [
   "ALTER TABLE payment_jobs ADD COLUMN expires_at INTEGER",
   "ALTER TABLE session_keys ADD COLUMN circle_wallet_id TEXT",
   "ALTER TABLE session_keys ADD COLUMN circle_wallet_address TEXT",
+  "ALTER TABLE store_products ADD COLUMN type TEXT DEFAULT 'one_time'",
+  "ALTER TABLE store_products ADD COLUMN interval_days INTEGER",
 ]) {
   try { db.exec(sql); } catch { /* column already exists */ }
 }
@@ -231,18 +233,20 @@ const stmts = {
   // store_products
   insertProduct: db.prepare(`
     INSERT INTO store_products
-      (id, merchant_address, name, description, price, image_url, active, sort_order, created_at)
+      (id, merchant_address, name, description, price, image_url, active, sort_order, type, interval_days, created_at)
     VALUES
-      (@id, @merchant_address, @name, @description, @price, @image_url, @active, @sort_order, @created_at)
+      (@id, @merchant_address, @name, @description, @price, @image_url, @active, @sort_order, @type, @interval_days, @created_at)
   `),
 
   updateProduct: db.prepare(`
     UPDATE store_products
-    SET name        = COALESCE(@name, name),
-        description = COALESCE(@description, description),
-        price       = COALESCE(@price, price),
-        image_url   = COALESCE(@image_url, image_url),
-        sort_order  = COALESCE(@sort_order, sort_order)
+    SET name          = COALESCE(@name, name),
+        description   = COALESCE(@description, description),
+        price         = COALESCE(@price, price),
+        image_url     = COALESCE(@image_url, image_url),
+        sort_order    = COALESCE(@sort_order, sort_order),
+        type          = COALESCE(@type, type),
+        interval_days = COALESCE(@interval_days, interval_days)
     WHERE id = @id AND merchant_address = @merchant_address
   `),
 
@@ -532,6 +536,8 @@ export function addProduct(product) {
     image_url: product.image_url ?? null,
     active: 1,
     sort_order: product.sort_order ?? 0,
+    type: product.type ?? "one_time",
+    interval_days: product.interval_days ?? null,
     created_at: Date.now(),
   });
 }
@@ -545,6 +551,8 @@ export function updateProduct(id, merchantAddress, updates) {
     price: updates.price ?? null,
     image_url: updates.image_url ?? null,
     sort_order: updates.sort_order ?? null,
+    type: updates.type ?? null,
+    interval_days: updates.interval_days ?? null,
   });
 }
 

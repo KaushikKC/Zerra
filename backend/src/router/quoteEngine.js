@@ -8,6 +8,8 @@ const GATEWAY_BRIDGE_FEE_USDC = 2.0;
 const ARC_GAS_FEE_USDC = 0.43;
 // Fee buffer multiplier applied to all fee estimates
 const FEE_BUFFER = 1.1;
+// Gas buffer for Arc-direct payments (session key EOA pays Arc USDC gas)
+const ARC_DIRECT_GAS_BUFFER_USDC = 0.2;
 
 /**
  * Round a number to 6 decimal places (USDC precision).
@@ -134,6 +136,39 @@ export async function getQuote(walletAddress, targetAmount, existingBalances = n
 
   // Fetch balances if not provided
   const balances = existingBalances ?? (await scanBalances(walletAddress));
+
+  // ── Arc-direct fast path ─────────────────────────────────────────────────────
+  // If the payer already holds enough USDC on Arc testnet, skip cross-chain entirely.
+  // The session key EOA pays directly on Arc — no Circle Gateway, no bridge fees.
+  const arcDirectChain = config.sourceChains.find((c) => c.isDirect);
+  if (arcDirectChain) {
+    const arcBalance = parseFloat(balances[arcDirectChain.key]?.usdc ?? "0");
+    const arcRequired = r6(target + ARC_DIRECT_GAS_BUFFER_USDC);
+    if (arcBalance >= arcRequired) {
+      const breakdown = {
+        swapFee: "0.000000",
+        bridgeFee: "0.000000",
+        arcGas: ARC_DIRECT_GAS_BUFFER_USDC.toFixed(6),
+        totalFees: ARC_DIRECT_GAS_BUFFER_USDC.toFixed(6),
+      };
+      return {
+        sourcePlan: [{
+          chain: arcDirectChain.key,
+          chainId: arcDirectChain.chainId,
+          type: "usdc",
+          amount: arcRequired.toFixed(6),
+          isDirect: true,
+        }],
+        balances,
+        breakdown,
+        totalFees: ARC_DIRECT_GAS_BUFFER_USDC.toFixed(6),
+        userAuthorizes: arcRequired.toFixed(6),
+        merchantReceives: target.toFixed(6),
+        sufficientFunds: true,
+        isDirect: true,
+      };
+    }
+  }
 
   // The user must provide target + fees from their wallet.
   // Estimate fixed fees upfront (bridge + arc gas) so the source plan correctly
