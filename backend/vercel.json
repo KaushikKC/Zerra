@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "buildCommand": "npm install",
+  "installCommand": "npm install",
+  "rewrites": [
+    { "source": "/api/cron", "destination": "/api/cron" },
+    { "source": "/(.*)", "destination": "/api" }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron",
+      "schedule": "*/5 * * * *"
+    }
+  ]
+}
