@@ -9,6 +9,7 @@ import MerchantDashboard from "./pages/MerchantDashboard";
 import Storefront from "./pages/Storefront";
 import Receipt from "./pages/Receipt";
 import SubscriptionAuth from "./pages/SubscriptionAuth";
+import PitchDeck from "./pages/PitchDeck";
 
 function AppLayout({ children }: { children: React.ReactNode }) {
   return (
