@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { parseUnits, keccak256, toHex, createPublicClient, createWalletClient, http } from "viem";
+import { parseUnits, formatEther, formatUnits, keccak256, toHex, createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import {
   createJob,
@@ -11,7 +11,7 @@ import {
 import { scanBalances } from "../scanner/balanceScanner.js";
 import { getQuote } from "../router/quoteEngine.js";
 import { getSwapProvider } from "../swap/swapProvider.js";
-import { buildSmartAccountClient, sendBatchUserOp } from "../aa/smartAccount.js";
+// smartAccount.js (ERC-4337) is no longer used in the payment flow — plain EOA only.
 import { decryptKey } from "../aa/sessionKeys.js";
 import { bridgeUsdcToArc } from "../bridge/bridgeKitBridge.js";
 import { config } from "../config/networks.js";
@@ -19,6 +19,19 @@ import { getSplitConfig } from "../merchant/merchant.js";
 import { dispatchWebhook } from "../webhooks/webhookDispatcher.js";
 
 const USDC_DECIMALS = 6;
+// How much ETH to keep on Ethereum Sepolia for gas when executing a swap
+const SWAP_GAS_RESERVE_WEI = parseUnits("0.003", 18);
+
+// Minimal ERC-20 ABI for reading USDC balance after a swap
+const ERC20_BALANCE_ABI = [
+  {
+    name: "balanceOf",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+];
 
 // PaymentRouter ABI — pay(), splitPay(), and ERC-20 approve()
 const PAYMENT_ROUTER_ABI = [
@@ -278,37 +291,80 @@ export async function confirmAndExecute(jobId) {
 async function stepSwap(jobId) {
   const job = await getJob(jobId);
   const swapSteps = job.source_plan.filter((s) => s.type === "swap");
-  console.log(`[orchestrator:${jobId}] SWAPPING (${swapSteps.length} steps)`);
+  console.log(`[orchestrator:${jobId}] SWAPPING (${swapSteps.length} steps) via EOA`);
+
+  const sessionKeyRow = await getSessionKey(job.payer_address);
+  if (!sessionKeyRow) throw new Error("Session key not found for payer");
+  const privateKey = decryptKey(sessionKeyRow.encrypted_private_key);
+  const account = privateKeyToAccount(privateKey);
 
   const swapProvider = getSwapProvider();
   const swapTxHashes = {};
+  const updatedPlan = [...job.source_plan];
 
   for (const step of swapSteps) {
-    const chain = config.sourceChains.find((c) => c.key === step.chain);
-    const sessionKeyRow = await getSessionKey(job.payer_address);
-    if (!sessionKeyRow) throw new Error("Session key not found for payer");
+    const chainConfig = config.sourceChains.find((c) => c.key === step.chain);
+    const viemChain = {
+      id: chainConfig.chainId,
+      name: chainConfig.name,
+      nativeCurrency: { decimals: 18, name: "ETH", symbol: "ETH" },
+      rpcUrls: { default: { http: [chainConfig.rpcUrl] } },
+    };
 
-    const client = await buildSmartAccountClient(
-      job.payer_address,
-      chain,
-      sessionKeyRow.encrypted_private_key
+    const publicClient = createPublicClient({ chain: viemChain, transport: http(chainConfig.rpcUrl) });
+    const walletClient = createWalletClient({ account, chain: viemChain, transport: http(chainConfig.rpcUrl) });
+
+    // The session key EOA received the user's ETH via the fund tx.
+    // Reserve SWAP_GAS_RESERVE_WEI for the swap tx gas cost; swap everything else.
+    const ethBalance = await publicClient.getBalance({ address: account.address });
+    const swapAmountWei = ethBalance > SWAP_GAS_RESERVE_WEI
+      ? ethBalance - SWAP_GAS_RESERVE_WEI
+      : (ethBalance * 8n) / 10n; // fallback: use 80% if balance is very low
+    const swapAmountEth = formatEther(swapAmountWei);
+
+    console.log(
+      `[orchestrator:${jobId}] Swapping ${swapAmountEth} ETH → USDC on ${step.chain}` +
+      ` (reserved ${formatEther(SWAP_GAS_RESERVE_WEI)} ETH for gas)`
     );
 
+    // Build Uniswap V2 swap tx — swapExactETHForTokens, USDC lands in session key EOA
     const swapTx = await swapProvider.buildSwapTx(
       step.fromToken,
       "USDC",
-      step.fromAmount,
-      client.account.address,
-      chain.chainId
+      swapAmountEth,
+      account.address,   // USDC recipient = session key EOA (same as sender)
+      chainConfig.chainId
     );
 
-    const { txHash } = await sendBatchUserOp(client, [swapTx]);
-    swapTxHashes[step.chain] = txHash;
-    console.log(`[orchestrator:${jobId}] Swap on ${step.chain}: ${txHash}`);
+    const hash = await walletClient.sendTransaction({
+      to: swapTx.to,
+      data: swapTx.data,
+      value: swapAmountWei,  // send the ETH being swapped (payable call)
+    });
+    await publicClient.waitForTransactionReceipt({ hash });
+    swapTxHashes[step.chain] = hash;
+    console.log(`[orchestrator:${jobId}] Swap confirmed on ${step.chain}: ${hash}`);
+
+    // Read actual USDC balance so stepBridge knows the exact amount to bridge
+    const usdcRaw = await publicClient.readContract({
+      address: chainConfig.usdcAddress,
+      abi: ERC20_BALANCE_ABI,
+      functionName: "balanceOf",
+      args: [account.address],
+    });
+    const actualUsdc = formatUnits(usdcRaw, USDC_DECIMALS);
+    console.log(`[orchestrator:${jobId}] Post-swap USDC on ${step.chain}: ${actualUsdc}`);
+
+    // Update this step in the plan with the actual USDC received
+    const planIdx = updatedPlan.findIndex((s) => s.chain === step.chain && s.type === "swap");
+    if (planIdx !== -1) {
+      updatedPlan[planIdx] = { ...updatedPlan[planIdx], fromAmount: swapAmountEth, toUsdc: actualUsdc };
+    }
   }
 
   await updateJobTxHash(jobId, { swap: swapTxHashes });
-  await updateJobStatus(jobId, "BRIDGING");
+  // Save updated plan (with actual toUsdc values) before bridging
+  await updateJobStatus(jobId, "BRIDGING", { source_plan: updatedPlan });
   await stepBridge(jobId);
 }
 

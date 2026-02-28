@@ -10,6 +10,10 @@ const ARC_GAS_FEE_USDC = 0.01;
 const FEE_BUFFER = 1.1;
 // Gas buffer for Arc-direct payments (session key EOA pays Arc USDC gas)
 const ARC_DIRECT_GAS_BUFFER_USDC = 0.05;
+// ETH to keep in the user's wallet so MetaMask can pay gas for the fund tx itself.
+// The session key gets (nativeEth - FUND_TX_GAS_RESERVE) ETH; the orchestrator then
+// further reserves SWAP_GAS_RESERVE (0.003 ETH) for the Uniswap tx gas.
+const FUND_TX_GAS_RESERVE_ETH = 0.005;
 
 /**
  * Round a number to 6 decimal places (USDC precision).
@@ -72,14 +76,17 @@ function buildSourcePlan(balances, targetUsdc) {
     if (!bal || bal.error || !chain.hasSwap) continue;
 
     const nativeEth = parseFloat(bal.native);
-    if (nativeEth <= 0) continue;
+    // Reserve FUND_TX_GAS_RESERVE_ETH so MetaMask can pay gas for the fund tx itself.
+    // The orchestrator further reserves 0.003 ETH for the Uniswap swap tx gas.
+    const ethForSwap = r6(nativeEth - FUND_TX_GAS_RESERVE_ETH);
+    if (ethForSwap <= 0) continue;
 
     sourcePlan.push({
       chain: chain.key,
       chainId: chain.chainId,
       type: "swap",
       fromToken: "ETH",
-      fromAmount: nativeEth.toFixed(6), // use all available ETH; quote engine trims later
+      fromAmount: ethForSwap.toFixed(6), // user sends this much ETH to session key EOA
       toUsdc: null, // filled in after swap quote
     });
 
