@@ -370,9 +370,10 @@ async function stepDeposit(jobId) {
     depositTxHashes[chainKey] = txHash;
     console.log(`[orchestrator:${jobId}] USDC transferred to Circle wallet on ${chainKey}: ${txHash}`);
 
-    // Step 2: Circle wallet calls approve+deposit via Circle SDK
-    // Circle's indexer registers this transaction IMMEDIATELY — no testnet lag.
-    const depositHash = await circleApproveAndDeposit(circleWalletId, chainKey, totalUsdc.toFixed(6));
+    // Step 2: Circle wallet calls approve+deposit via Circle SDK.
+    // circleApproveAndDeposit auto-funds ETH for gas and waits for Circle to
+    // index the USDC before submitting — eliminates all testnet indexer lag.
+    const depositHash = await circleApproveAndDeposit(circleWalletId, circleWalletAddress, chainKey, totalUsdc.toFixed(6));
     depositTxHashes[`${chainKey}_deposit`] = depositHash;
     console.log(`[orchestrator:${jobId}] Circle wallet deposited on ${chainKey}: ${depositHash}`);
   }
@@ -480,7 +481,10 @@ async function stepPay(jobId) {
     sessionKeyRow.encrypted_private_key
   );
 
-  const grossAmount = parseUnits(job.quote.userAuthorizes, USDC_DECIMALS);
+  // grossAmount = what the merchant should receive (before PaymentRouter fee).
+  // The smart account on Arc holds userAuthorizes minus Circle's bridge fee, which is
+  // always >> merchantReceives, so the smart account has sufficient balance.
+  const grossAmount = parseUnits(job.quote.merchantReceives, USDC_DECIMALS);
   const paymentRef = job.payment_ref
     ? keccak256(toHex(job.payment_ref))
     : `0x${"00".repeat(32)}`;

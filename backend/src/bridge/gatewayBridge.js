@@ -354,6 +354,13 @@ export async function initiateTransfer(
 
     const amountRaw = parseUnits(plan.amount, USDC_DECIMALS);
 
+    // Circle deducts (value + protocol_fee) from the depositor's gateway balance.
+    // We set BurnIntent.value = deposited - 0.5% buffer so that:
+    //   deposited_amount >= value + Circle_actual_fee   (actual fee ≈ 0.277%)
+    // The smart account on Arc receives exactly `value` (fee is never charged to recipient).
+    const circleFeeBuffer = amountRaw * BigInt(5) / BigInt(1000); // 0.5% ≥ actual fee ~0.277%
+    const burnIntentValue = amountRaw - circleFeeBuffer;
+
     // Step 1: Verify on-chain that GatewayWallet recorded the deposit.
     // availableBalance(token, depositor) — token is first arg (confirmed from ABI).
     const onchainBalance = await checkOnchainBalance(
@@ -386,7 +393,7 @@ export async function initiateTransfer(
         destinationRecipient: addressToBytes32(recipientAddress), // smart account on Arc
         sourceSigner: addressToBytes32(depositorAddress),         // same as depositor — self-sign
         destinationCaller: addressToBytes32(zeroAddress),
-        value: amountRaw,
+        value: burnIntentValue,
         salt: `0x${randomBytes(32).toString("hex")}`,
         hookData: "0x",
       },
