@@ -42,6 +42,13 @@ function fmt(ts: number, ms = false) {
   })
 }
 
+function fmtUsdc(value: string | null | undefined): string {
+  if (value == null || value === '') return '—'
+  const n = Number(value)
+  if (Number.isNaN(n)) return value
+  return n.toFixed(2)
+}
+
 // ── Dashed divider ─────────────────────────────────────────────────────────
 function Tear() {
   return (
@@ -158,7 +165,7 @@ export default function Receipt() {
           {/* ── Amount hero ──────────────────────────────────────────────── */}
           <div className="px-8 py-7 text-center border-b border-gray-100">
             <p className="text-[42px] font-black text-[#132318] tracking-tight leading-none tabular-nums">
-              {amount}
+              {fmtUsdc(amount)}
               <span className="text-xl font-bold text-[#132318]/25 ml-2">USDC</span>
             </p>
             {receipt.label && (
@@ -235,7 +242,7 @@ export default function Receipt() {
                             <p className="text-[10px] text-[#132318]/40 font-medium">{typeLabel}</p>
                           </div>
                         </div>
-                        <span className="text-xs font-black text-[#132318] tabular-nums">{stepAmount ?? '—'} USDC</span>
+                        <span className="text-xs font-black text-[#132318] tabular-nums">{fmtUsdc(stepAmount)} USDC</span>
                       </div>
                     )
                   })}
@@ -257,7 +264,7 @@ export default function Receipt() {
                     </div>
                   </div>
                   <span className="text-sm font-black text-[#E1FF76] tabular-nums">
-                    {receipt.merchantReceives ?? receipt.targetAmount} USDC
+                    {fmtUsdc(receipt.merchantReceives ?? receipt.targetAmount)} USDC
                   </span>
                 </div>
               </div>
@@ -284,7 +291,7 @@ export default function Receipt() {
               onClick={async () => {
                 const url = window.location.href
                 if (navigator.share) {
-                  await navigator.share({ title: 'Zerra Receipt', text: `${amount} USDC payment receipt`, url })
+                  await navigator.share({ title: 'Zerra Receipt', text: `${fmtUsdc(amount)} USDC payment receipt`, url })
                 } else {
                   await navigator.clipboard.writeText(url)
                   toast.success('Receipt link copied!')
