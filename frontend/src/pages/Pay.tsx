@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
-import { useAccount, useSendTransaction } from 'wagmi'
+import { useAccount, useSendTransaction, useSwitchChain } from 'wagmi'
 import { waitForTransactionReceipt } from '@wagmi/core'
 import { wagmiConfig } from '../config/wagmiConfig'
 import {
@@ -49,6 +49,7 @@ export default function Pay() {
   const navigate = useNavigate()
   const { address: walletAddress, isConnected } = useAccount()
   const { sendTransactionAsync } = useSendTransaction()
+  const { switchChainAsync } = useSwitchChain()
 
   const [flowState, setFlowState] = useState<FlowState>('landing')
   const [linkParams, setLinkParams] = useState<LinkParams | null>(null)
@@ -126,8 +127,9 @@ export default function Pay() {
 
     try {
       // 1. Create session key — backend derives payer address + fund txes.
-      //    For Arc-direct: payerAddress = sessionAddress (EOA on Arc).
-      //    For cross-chain: payerAddress = smartAccountAddress (ERC-4337).
+      //    payerAddress = sessionAddress (session key EOA) in all cases.
+      //    Arc-direct: EOA holds USDC on Arc, pays directly.
+      //    Cross-chain: Bridge Kit bridges USDC to same EOA on Arc, then pays directly.
       const sessionRes = await fetch(`${API_BASE}/api/session/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -142,9 +144,11 @@ export default function Pay() {
       const { payerAddress, fundTxes } = await sessionRes.json()
 
       // 2. Send fund transactions — user signs each tx to transfer assets.
-      //    Arc-direct: transfer USDC to session key EOA on Arc.
-      //    Cross-chain: transfer USDC/ETH to smart account on source chains.
+      //    Switch to the correct chain first so MetaMask doesn't reject the tx.
+      //    Arc-direct: switch to Arc Testnet, transfer USDC to session key EOA.
+      //    Cross-chain: switch to Base/Ethereum Sepolia, transfer USDC to session key EOA.
       for (const tx of fundTxes) {
+        await switchChainAsync({ chainId: tx.chainId })
         const hash = await sendTransactionAsync({
           to: tx.to as `0x${string}`,
           data: tx.data as `0x${string}`,

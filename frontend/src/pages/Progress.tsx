@@ -9,9 +9,9 @@ interface Step {
   id: string
   label: string
   activeLabel: string
-  triggeredBy: JobStatus[]   // job statuses that make this step "active"
-  doneAt: JobStatus[]        // job statuses that mark this step "done"
-  txKey?: keyof { swap: unknown; deposit: unknown; transfer: unknown; mint: unknown; pay: unknown }
+  triggeredBy: JobStatus[]
+  doneAt: JobStatus[]
+  txKey?: string
   explorerBase?: string
 }
 
@@ -19,53 +19,36 @@ const STEPS: Step[] = [
   {
     id: 'scan',
     label: 'Wallet scanned',
-    activeLabel: 'Scanning balances across chains…',
+    activeLabel: 'Scanning USDC balances across chains…',
     triggeredBy: ['SCANNING'],
-    doneAt: ['ROUTING', 'AWAITING_CONFIRMATION', 'SWAPPING', 'GATEWAY_DEPOSITING', 'GATEWAY_TRANSFERRING', 'MINTING', 'PAYING', 'COMPLETE'],
+    doneAt: ['ROUTING', 'AWAITING_CONFIRMATION', 'SWAPPING', 'BRIDGING', 'PAYING', 'COMPLETE'],
   },
   {
     id: 'route',
     label: 'Route calculated',
-    activeLabel: 'Building optimal sourcing plan…',
+    activeLabel: 'Building optimal multi-chain sourcing plan…',
     triggeredBy: ['ROUTING', 'AWAITING_CONFIRMATION'],
-    doneAt: ['SWAPPING', 'GATEWAY_DEPOSITING', 'GATEWAY_TRANSFERRING', 'MINTING', 'PAYING', 'COMPLETE'],
+    doneAt: ['SWAPPING', 'BRIDGING', 'PAYING', 'COMPLETE'],
   },
   {
     id: 'swap',
-    label: 'Swap on source chain',
+    label: 'ETH swapped to USDC',
     activeLabel: 'Swapping ETH → USDC via Uniswap…',
     triggeredBy: ['SWAPPING'],
-    doneAt: ['GATEWAY_DEPOSITING', 'GATEWAY_TRANSFERRING', 'MINTING', 'PAYING', 'COMPLETE'],
+    doneAt: ['BRIDGING', 'PAYING', 'COMPLETE'],
     txKey: 'swap',
   },
   {
-    id: 'deposit',
-    label: 'Deposit to Circle Gateway',
-    activeLabel: 'Depositing USDC into Circle Gateway…',
-    triggeredBy: ['GATEWAY_DEPOSITING'],
-    doneAt: ['GATEWAY_TRANSFERRING', 'MINTING', 'PAYING', 'COMPLETE'],
-    txKey: 'deposit',
-  },
-  {
-    id: 'transfer',
-    label: 'Cross-chain transfer',
-    activeLabel: 'Initiating Circle Gateway transfer…',
-    triggeredBy: ['GATEWAY_TRANSFERRING'],
-    doneAt: ['MINTING', 'PAYING', 'COMPLETE'],
-  },
-  {
-    id: 'mint',
-    label: 'Mint USDC on Arc',
-    activeLabel: 'Minting USDC on Arc Testnet…',
-    triggeredBy: ['MINTING'],
+    id: 'bridge',
+    label: 'Bridged to Arc via CCTPv2',
+    activeLabel: 'Bridging USDC to Arc Testnet via Circle Bridge Kit…',
+    triggeredBy: ['BRIDGING'],
     doneAt: ['PAYING', 'COMPLETE'],
-    txKey: 'mint',
-    explorerBase: 'https://testnet.arcscan.app/tx',
   },
   {
     id: 'pay',
-    label: 'Payment executed on Arc',
-    activeLabel: 'Executing payment via PaymentRouter…',
+    label: 'Payment sent to merchant',
+    activeLabel: 'Executing payment via PaymentRouter on Arc…',
     triggeredBy: ['PAYING'],
     doneAt: ['COMPLETE'],
     txKey: 'pay',
@@ -73,19 +56,18 @@ const STEPS: Step[] = [
   },
 ]
 
-// ── Progress percentage by status ─────────────────────────────────────────────
+// ── Progress percentage — smooth curve across all real states ─────────────────
 
 const STATUS_PROGRESS: Record<JobStatus, number> = {
-  SCANNING: 8,
-  ROUTING: 16,
-  AWAITING_CONFIRMATION: 20,
-  SWAPPING: 35,
-  GATEWAY_DEPOSITING: 50,
-  GATEWAY_TRANSFERRING: 65,
-  MINTING: 80,
-  PAYING: 92,
-  COMPLETE: 100,
-  FAILED: 100,
+  SCANNING:             10,
+  ROUTING:              22,
+  AWAITING_CONFIRMATION: 28,
+  SWAPPING:             42,
+  BRIDGING:             60,
+  PAYING:               90,
+  COMPLETE:            100,
+  FAILED:              100,
+  EXPIRED:             100,
 }
 
 function getStepState(step: Step, status: JobStatus): 'done' | 'active' | 'pending' {
@@ -98,7 +80,6 @@ function getTxHash(txHashes: Record<string, unknown> | null, txKey?: string): st
   if (!txKey || !txHashes) return null
   const val = txHashes[txKey]
   if (!val) return null
-  // If it's an object (per-chain map), just grab the first value
   if (typeof val === 'object') return Object.values(val as Record<string, string>)[0] ?? null
   return val as string
 }
@@ -110,7 +91,6 @@ export default function Progress() {
   const navigate = useNavigate()
   const { data: job } = usePayment(jobId)
 
-  // Navigate on terminal state
   useEffect(() => {
     if (!job) return
     if (job.status === 'COMPLETE') navigate(`/success/${jobId}`)
@@ -120,6 +100,11 @@ export default function Progress() {
   const status: JobStatus = job?.status ?? 'SCANNING'
   const progress = STATUS_PROGRESS[status] ?? 0
   const txHashes = job?.txHashes ?? null
+
+  // Show swap step only if job actually has swap steps in the source plan
+  const sourcePlan = (job?.sourcePlan as Array<{ type: string }> | null) ?? []
+  const hasSwap = sourcePlan.some((s) => s.type === 'swap')
+  const visibleSteps = STEPS.filter((s) => s.id !== 'swap' || hasSwap)
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-24 sm:py-40">
@@ -156,7 +141,7 @@ export default function Progress() {
           </div>
           <div className="mt-8 flex justify-center">
             <div className="px-6 py-2 bg-[#E1FF76] rounded-full text-[10px] font-black uppercase tracking-[0.2em] shadow-lg shadow-[#E1FF7633]">
-              Current: {status.replace(/_/g, ' ')}
+              {status.replace(/_/g, ' ')}
             </div>
           </div>
         </div>
@@ -164,7 +149,7 @@ export default function Progress() {
         {/* Live step tracker */}
         <div className="space-y-10 relative">
           <div className="absolute left-[13px] top-4 bottom-4 w-0.5 bg-[#132318]/[0.05]" />
-          {STEPS.map((step) => {
+          {visibleSteps.map((step) => {
             const state = getStepState(step, status)
             const txHash = getTxHash(txHashes as Record<string, unknown> | null, step.txKey)
             return (

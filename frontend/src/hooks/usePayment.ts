@@ -6,18 +6,14 @@ export type JobStatus =
   | 'ROUTING'
   | 'AWAITING_CONFIRMATION'
   | 'SWAPPING'
-  | 'GATEWAY_DEPOSITING'
-  | 'GATEWAY_TRANSFERRING'
-  | 'MINTING'
+  | 'BRIDGING'
   | 'PAYING'
   | 'COMPLETE'
   | 'FAILED'
+  | 'EXPIRED'
 
 export interface TxHashes {
   swap?: Record<string, string>
-  deposit?: Record<string, string>
-  transfer?: string
-  mint?: string
   pay?: string
 }
 
@@ -45,7 +41,7 @@ export interface PaymentJob {
   updatedAt: number
 }
 
-const TERMINAL_STATES: JobStatus[] = ['COMPLETE', 'FAILED']
+const TERMINAL_STATES: JobStatus[] = ['COMPLETE', 'FAILED', 'EXPIRED']
 
 async function fetchJobStatus(jobId: string): Promise<PaymentJob> {
   const res = await fetch(`${API_BASE}/api/pay/${jobId}/status`)

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
-import { useAccount, useSendTransaction } from 'wagmi'
+import { useAccount, useSendTransaction, useSwitchChain } from 'wagmi'
 import { RefreshCw, CheckCircle2, Loader2, AlertTriangle, X } from 'lucide-react'
 import { API_BASE } from '../config/wagmiConfig'
 
@@ -22,6 +22,7 @@ export default function SubscriptionAuth() {
   const [searchParams] = useSearchParams()
   const { address, isConnected } = useAccount()
   const { sendTransactionAsync } = useSendTransaction()
+  const { switchChainAsync } = useSwitchChain()
 
   // Plan mode: /subscribe/new?merchantAddress=...&amount=...&intervalDays=...&label=...
   const isPlanMode = subscriptionId === 'new'
@@ -88,8 +89,9 @@ export default function SubscriptionAuth() {
       if (!sessionRes.ok) throw new Error('Failed to create session key')
       const { fundTxes } = await sessionRes.json()
 
-      // 2. Fund the smart account
+      // 2. Fund the correct account — switch chain first so MetaMask doesn't reject
       for (const tx of fundTxes) {
+        await switchChainAsync({ chainId: tx.chainId })
         await sendTransactionAsync({
           to: tx.to as `0x${string}`,
           data: tx.data as `0x${string}`,
