@@ -24,9 +24,14 @@ function rpcForChainId(chainId) {
 }
 
 /**
- * Build a viem public + wallet client pair for a given chainConfig entry.
+ * Ensure the session key EOA has enough ETH on the source chain to pay gas.
+ * (Base Sepolia / Ethereum Sepolia — native gas token is ETH, 18 decimals)
  */
-function makeClients(chainConfig, account) {
+async function ensureSourceGas(account, chainConfig) {
+  const MIN_GAS_WEI = parseUnits("0.0005", 18);
+  const FUND_AMOUNT_WEI = parseUnits("0.002", 18);
+
+  // Use ETH as native (standard EVM chains)
   const chain = {
     id: chainConfig.chainId,
     name: chainConfig.name,
@@ -34,25 +39,9 @@ function makeClients(chainConfig, account) {
     rpcUrls: { default: { http: [chainConfig.rpcUrl] } },
   };
   const publicClient = createPublicClient({ chain, transport: http(chainConfig.rpcUrl) });
-  const walletClient = createWalletClient({ account, chain, transport: http(chainConfig.rpcUrl) });
-  return { publicClient, walletClient };
-}
-
-/**
- * Ensure the session key EOA has enough ETH on the source chain to pay gas.
- *
- * Bridge Kit submits 2 transactions from the EOA (approve + burn), so it needs ETH.
- * Auto-funds from BACKEND_GAS_FUNDER_PRIVATE_KEY if the balance is too low.
- */
-async function ensureGas(account, chainConfig) {
-  const MIN_GAS_WEI = parseUnits("0.0005", 18); // covers approve + burn with margin
-  const FUND_AMOUNT_WEI = parseUnits("0.002", 18);
-
-  const { publicClient, walletClient: _ } = makeClients(chainConfig, account);
   const ethBalance = await publicClient.getBalance({ address: account.address });
   console.log(`[bridgeKitBridge] EOA ${account.address} ETH balance on ${chainConfig.key}: ${ethBalance} wei`);
-
-  if (ethBalance >= MIN_GAS_WEI) return; // already has enough
+  if (ethBalance >= MIN_GAS_WEI) return;
 
   let funderKey = process.env.BACKEND_GAS_FUNDER_PRIVATE_KEY?.trim();
   if (!funderKey) {
@@ -64,12 +53,6 @@ async function ensureGas(account, chainConfig) {
   if (!funderKey.startsWith("0x")) funderKey = "0x" + funderKey;
 
   const funderAccount = privateKeyToAccount(funderKey);
-  const chain = {
-    id: chainConfig.chainId,
-    name: chainConfig.name,
-    nativeCurrency: { decimals: 18, name: "ETH", symbol: "ETH" },
-    rpcUrls: { default: { http: [chainConfig.rpcUrl] } },
-  };
   const funderClient = createWalletClient({ account: funderAccount, chain, transport: http(chainConfig.rpcUrl) });
   const funderPublic = createPublicClient({ chain, transport: http(chainConfig.rpcUrl) });
 
@@ -80,15 +63,66 @@ async function ensureGas(account, chainConfig) {
 }
 
 /**
+ * Ensure the session key EOA has enough USDC on Arc Testnet to pay gas.
+ *
+ * Arc Testnet uses USDC as the native gas token. Bridge Kit's CCTP provider
+ * checks the native balance on the destination chain before submitting the
+ * mint transaction — the EOA must have USDC already to pay for that tx.
+ *
+ * Arc's native currency is represented with 18 decimals for gas calculations,
+ * even though the ERC-20 USDC uses 6 decimals.
+ * (Source: Bridge Kit's ArcTestnet chain definition in @circle-fin/provider-cctp-v2)
+ */
+async function ensureArcGas(account) {
+  const arcChainConfig = config.destinationChain;
+
+  // Arc's native USDC gas uses 18 decimals (EVM standard for gas checks)
+  const MIN_GAS_WEI = parseUnits("0.001", 18);   // 0.001 USDC gas-units
+  const FUND_AMOUNT_WEI = parseUnits("0.005", 18); // 0.005 USDC gas-units
+
+  const arcChain = {
+    id: arcChainConfig.chainId,
+    name: arcChainConfig.name,
+    // Arc uses USDC as native gas token — Bridge Kit expects 18 decimals here
+    nativeCurrency: { decimals: 18, name: "USDC", symbol: "USDC" },
+    rpcUrls: { default: { http: [arcChainConfig.rpcUrl] } },
+  };
+
+  const publicClient = createPublicClient({ chain: arcChain, transport: http(arcChainConfig.rpcUrl) });
+  const nativeBalance = await publicClient.getBalance({ address: account.address });
+  console.log(`[bridgeKitBridge] EOA ${account.address} native USDC balance on Arc: ${nativeBalance} (18dec)`);
+  if (nativeBalance >= MIN_GAS_WEI) return;
+
+  let funderKey = process.env.BACKEND_GAS_FUNDER_PRIVATE_KEY?.trim();
+  if (!funderKey) {
+    throw new Error(
+      `Session key EOA ${account.address} has no USDC on Arc for gas. ` +
+      `Set BACKEND_GAS_FUNDER_PRIVATE_KEY (must have USDC on Arc Testnet) in .env.`
+    );
+  }
+  if (!funderKey.startsWith("0x")) funderKey = "0x" + funderKey;
+
+  const funderAccount = privateKeyToAccount(funderKey);
+  const funderClient = createWalletClient({ account: funderAccount, chain: arcChain, transport: http(arcChainConfig.rpcUrl) });
+  const funderPublic = createPublicClient({ chain: arcChain, transport: http(arcChainConfig.rpcUrl) });
+
+  console.log(`[bridgeKitBridge] Pre-funding EOA ${account.address} with gas USDC on Arc...`);
+  const fundHash = await funderClient.sendTransaction({ to: account.address, value: FUND_AMOUNT_WEI });
+  await funderPublic.waitForTransactionReceipt({ hash: fundHash });
+  console.log(`[bridgeKitBridge] Arc gas funded: ${fundHash}`);
+}
+
+/**
  * Bridge USDC from a source chain to Arc Testnet using Circle Bridge Kit (CCTPv2).
  *
  * The session key private key signs ALL transactions:
- *   1. approve USDC on source chain
- *   2. burn via CCTPv2 fast transfer
- *   3. mint USDC on Arc Testnet (automatic — no manual attestation polling)
+ *   1. approve USDC on source chain        (needs ETH gas on source)
+ *   2. burn via CCTPv2 fast transfer       (needs ETH gas on source)
+ *   3. mint USDC on Arc Testnet            (needs USDC gas on Arc)
  *
- * USDC lands at the session key EOA address on Arc. The orchestrator then
- * calls stepDirectArcPay to pay the merchant from that same EOA.
+ * After this call, the session key EOA address holds the bridged USDC on Arc.
+ * The orchestrator then calls stepDirectArcPay to send it to the merchant's
+ * MetaMask wallet via PaymentRouter.
  *
  * @param {string} signerPrivateKey  - Session key EOA private key (0x-prefixed)
  * @param {string} sourceChainKey   - Source chain key, e.g. 'base-sepolia'
@@ -106,8 +140,9 @@ export async function bridgeUsdcToArc(signerPrivateKey, sourceChainKey, amountUs
 
   const account = privateKeyToAccount(signerPrivateKey);
 
-  // Ensure the EOA has ETH for gas before Bridge Kit tries to send transactions
-  await ensureGas(account, sourceChainConfig);
+  // Gas pre-checks — must run before kit.bridge() which checks both chains
+  await ensureSourceGas(account, sourceChainConfig);
+  await ensureArcGas(account);
 
   const kit = new BridgeKit();
 

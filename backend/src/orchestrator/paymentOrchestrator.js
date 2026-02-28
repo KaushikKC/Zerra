@@ -429,92 +429,13 @@ async function stepDirectArcPay(jobId) {
   });
 }
 
-// ── State: PAYING (cross-chain — smart account via ERC-4337) ─────────────────
+// ── State: PAYING ─────────────────────────────────────────────────────────────
 
 async function stepPay(jobId) {
-  const job = await getJob(jobId);
-
-  // Arc-direct: payer was already on Arc
-  // Bridge Kit: USDC was just bridged to session key EOA on Arc
-  // Both paths: session key EOA pays merchant directly (no ERC-4337)
-  if (job.quote?.isDirect || job.quote?._bridgeKit || job.source_plan?.some((s) => s.isDirect)) {
-    await stepDirectArcPay(jobId);
-    return;
-  }
-
-  console.log(`[orchestrator:${jobId}] PAYING merchant on Arc`);
-
-  const routerAddress = process.env.PAYMENT_ROUTER_ADDRESS;
-  if (!routerAddress) throw new Error("PAYMENT_ROUTER_ADDRESS not set");
-
-  const sessionKeyRow = await getSessionKey(job.payer_address);
-  if (!sessionKeyRow) throw new Error("Session key not found for payer");
-
-  const arcClient = await buildSmartAccountClient(
-    job.payer_address,
-    config.destinationChain,
-    sessionKeyRow.encrypted_private_key
-  );
-
-  // grossAmount = what the merchant should receive (before PaymentRouter fee).
-  // The smart account on Arc holds userAuthorizes minus Circle's bridge fee, which is
-  // always >> merchantReceives, so the smart account has sufficient balance.
-  const grossAmount = parseUnits(job.quote.merchantReceives, USDC_DECIMALS);
-  const paymentRef = job.payment_ref
-    ? keccak256(toHex(job.payment_ref))
-    : `0x${"00".repeat(32)}`;
-
-  // Approve PaymentRouter to spend grossAmount
-  const approveTx = {
-    to: config.destinationChain.usdcAddress,
-    data: encodeFunctionData({
-      abi: PAYMENT_ROUTER_ABI,
-      functionName: "approve",
-      args: [routerAddress, grossAmount],
-    }),
-    value: 0n,
-  };
-
-  // Check for split config
-  const splitConfig = await getSplitConfig(job.merchant_address);
-
-  let payTx;
-  if (splitConfig && splitConfig.length > 0) {
-    const recipients = splitConfig.map((s) => s.address);
-    const bps = splitConfig.map((s) => BigInt(s.bps));
-    payTx = {
-      to: routerAddress,
-      data: encodeFunctionData({
-        abi: PAYMENT_ROUTER_ABI,
-        functionName: "splitPay",
-        args: [recipients, bps, grossAmount, paymentRef],
-      }),
-      value: 0n,
-    };
-    console.log(`[orchestrator:${jobId}] Using splitPay with ${splitConfig.length} recipients`);
-  } else {
-    payTx = {
-      to: routerAddress,
-      data: encodeFunctionData({
-        abi: PAYMENT_ROUTER_ABI,
-        functionName: "pay",
-        args: [job.merchant_address, grossAmount, paymentRef],
-      }),
-      value: 0n,
-    };
-  }
-
-  const { txHash } = await sendBatchUserOp(arcClient, [approveTx, payTx]);
-
-  await updateJobTxHash(jobId, { pay: txHash });
-  await updateJobStatus(jobId, "COMPLETE");
-  console.log(`[orchestrator:${jobId}] COMPLETE — tx: ${txHash}`);
-
-  // Dispatch webhook async (never fails the job)
-  const completedJob = await getJob(jobId);
-  dispatchWebhook(completedJob).catch((err) => {
-    console.error(`[orchestrator:${jobId}] Webhook dispatch error:`, err.message);
-  });
+  // All payment paths use the session key EOA directly on Arc (no ERC-4337).
+  //   Arc-direct:  EOA already had USDC on Arc.
+  //   Bridge Kit:  USDC just bridged to the same EOA address on Arc.
+  await stepDirectArcPay(jobId);
 }
 
 // ── Retry ─────────────────────────────────────────────────────────────────────
