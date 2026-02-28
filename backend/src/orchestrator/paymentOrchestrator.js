@@ -18,6 +18,13 @@ import {
   initiateTransfer,
   buildMintTx,
 } from "../bridge/gatewayBridge.js";
+import {
+  createCircleGatewayWallet,
+  circleApproveAndDeposit,
+} from "../circle/circleDeposit.js";
+import {
+  updateSessionKeyCircleWallet,
+} from "../db/database.js";
 import { config } from "../config/networks.js";
 import { getSplitConfig } from "../merchant/merchant.js";
 import { dispatchWebhook } from "../webhooks/webhookDispatcher.js";
@@ -320,7 +327,7 @@ async function stepDeposit(jobId) {
 
   for (const [chainKey, steps] of Object.entries(chainGroups)) {
     const chain = config.sourceChains.find((c) => c.key === chainKey);
-    const sessionKeyRow = getSessionKey(job.payer_address);
+    let sessionKeyRow = getSessionKey(job.payer_address);
     if (!sessionKeyRow) throw new Error("Session key not found for payer");
 
     const client = await buildSmartAccountClient(
@@ -335,21 +342,39 @@ async function stepDeposit(jobId) {
     }, 0);
 
     console.log(`[orchestrator:${jobId}] Smart account: ${client.account.address}`);
-    console.log(`[orchestrator:${jobId}] Session key EOA (will be depositor): ${sessionKeyRow.session_address}`);
 
-    // Step 1: Smart account transfers USDC to session key EOA (UserOp, Pimlico-sponsored)
-    const transferTx = buildTransferToEoaTx(chainKey, totalUsdc.toFixed(6), sessionKeyRow.session_address);
+    // ── Get or create a Circle-managed EOA wallet for this session ──────────
+    // The Circle wallet is the Gateway depositor + BurnIntent signer.
+    // Using Circle SDK for approve+deposit means Circle's indexer knows immediately
+    // (no testnet delay), so the BurnIntent is accepted without waiting.
+
+    let circleWalletId = sessionKeyRow.circle_wallet_id;
+    let circleWalletAddress = sessionKeyRow.circle_wallet_address;
+
+    if (!circleWalletId) {
+      console.log(`[orchestrator:${jobId}] Creating Circle gateway wallet for payer ${job.payer_address}...`);
+      const created = await createCircleGatewayWallet();
+      circleWalletId = created.walletId;
+      circleWalletAddress = created.walletAddress;
+      updateSessionKeyCircleWallet(job.payer_address, circleWalletId, circleWalletAddress);
+      console.log(`[orchestrator:${jobId}] Circle wallet: ${circleWalletAddress} (id: ${circleWalletId})`);
+      // Re-fetch the row so stepTransfer can read the updated addresses
+      sessionKeyRow = getSessionKey(job.payer_address);
+    } else {
+      console.log(`[orchestrator:${jobId}] Using existing Circle wallet: ${circleWalletAddress} (id: ${circleWalletId})`);
+    }
+
+    // Step 1: Smart account transfers USDC to Circle wallet address (UserOp, Pimlico-sponsored)
+    const transferTx = buildTransferToEoaTx(chainKey, totalUsdc.toFixed(6), circleWalletAddress);
     const { txHash } = await sendBatchUserOp(client, [transferTx]);
     depositTxHashes[chainKey] = txHash;
-    console.log(`[orchestrator:${jobId}] USDC transferred to session key EOA on ${chainKey}: ${txHash}`);
+    console.log(`[orchestrator:${jobId}] USDC transferred to Circle wallet on ${chainKey}: ${txHash}`);
 
-    // Step 2: Session key EOA calls approve + deposit directly (msg.sender = EOA = depositor)
-    // This bypasses ERC-4337 so tx.origin == msg.sender == EOA, satisfying GatewayWallet.
-    // sourceDepositor == sourceSigner → no addDelegate needed.
-    const signerPrivateKey = decryptKey(sessionKeyRow.encrypted_private_key);
-    const { depositHash } = await callEoaApproveAndDeposit(chainKey, signerPrivateKey, totalUsdc.toFixed(6));
+    // Step 2: Circle wallet calls approve+deposit via Circle SDK
+    // Circle's indexer registers this transaction IMMEDIATELY — no testnet lag.
+    const depositHash = await circleApproveAndDeposit(circleWalletId, chainKey, totalUsdc.toFixed(6));
     depositTxHashes[`${chainKey}_deposit`] = depositHash;
-    console.log(`[orchestrator:${jobId}] EOA deposited on ${chainKey}: ${depositHash}`);
+    console.log(`[orchestrator:${jobId}] Circle wallet deposited on ${chainKey}: ${depositHash}`);
   }
 
   updateJobTxHash(jobId, { deposit: depositTxHashes });
@@ -378,23 +403,25 @@ async function stepTransfer(jobId) {
     amount: amount.toFixed(6),
   }));
 
-  const signerPrivateKey = decryptKey(sessionKeyRow.encrypted_private_key);
+  // Circle wallet deposited and will sign the BurnIntent (preferred path)
+  // Falls back to raw EOA signing if no Circle wallet was created
+  const circleWalletId = sessionKeyRow.circle_wallet_id ?? null;
+  const depositorAddress = sessionKeyRow.circle_wallet_address ?? sessionKeyRow.session_address;
+  const signerPrivateKey = circleWalletId ? null : decryptKey(sessionKeyRow.encrypted_private_key);
 
-  // Session key EOA called deposit() directly → it is the depositor AND signer.
-  // sourceDepositor == sourceSigner == session key EOA → no addDelegate needed.
-  const depositorAddress = sessionKeyRow.session_address; // session key EOA (has gateway balance)
-  const recipientAddress = job.payer_address;             // smart account receives USDC on Arc
+  const recipientAddress = job.payer_address; // smart account on Arc (receives minted USDC)
 
-  console.log(`[orchestrator:${jobId}] Depositor/Signer (session key EOA): ${depositorAddress}`);
+  console.log(`[orchestrator:${jobId}] Depositor: ${depositorAddress} (${circleWalletId ? "Circle wallet" : "session key EOA"})`);
   console.log(`[orchestrator:${jobId}] Recipient on Arc (smart account): ${recipientAddress}`);
 
   // Destination recipient is the smart account (USDC lands here, stepPay pays merchant)
   const { attestation, attestationSignature } = await initiateTransfer(
     sources,
     config.destinationChain.key,
-    recipientAddress,   // minted USDC goes to smart account on Arc
-    depositorAddress,   // session key EOA holds the gateway balance
-    signerPrivateKey
+    recipientAddress,    // minted USDC goes to smart account on Arc
+    depositorAddress,    // Circle wallet (or EOA) holds the gateway balance
+    signerPrivateKey,    // null if using Circle SDK
+    circleWalletId       // Circle wallet ID for SDK signing (preferred)
   );
 
   updateJobStatus(jobId, "MINTING", {

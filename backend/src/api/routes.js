@@ -1,0 +1,542 @@
+import { Router } from "express";
+import { encodeFunctionData, parseUnits, parseEther } from "viem";
+import { scanBalances } from "../scanner/balanceScanner.js";
+import { getQuote } from "../router/quoteEngine.js";
+import { generateSessionKey, encryptKey } from "../aa/sessionKeys.js";
+import { getSmartAccountAddressForKey } from "../aa/smartAccount.js";
+import {
+  saveSessionKey,
+  getSessionKey,
+  getJob,
+  getMerchantWebhookDeliveries,
+} from "../db/database.js";
+import {
+  createPaymentJob,
+  confirmAndExecute,
+  retryJob,
+} from "../orchestrator/paymentOrchestrator.js";
+import { generatePaymentLink, verifyPaymentLink } from "../links/paymentLinks.js";
+import {
+  registerMerchant,
+  getMerchant,
+  getMerchantPayments,
+  getMerchantAllPayments,
+  updateWebhookUrl,
+  setSplitConfig,
+  getSplitConfig,
+} from "../merchant/merchant.js";
+import { setupSlug, upsertProduct, removeProduct, getStorefront } from "../storefront/storefront.js";
+import {
+  createSubscription,
+  getSubscription,
+  authorizeSubscription,
+  cancelSubscription,
+  getMerchantSubscriptions,
+  getPayerSubscriptions,
+} from "../subscriptions/subscriptions.js";
+import { dispatchTestWebhook } from "../webhooks/webhookDispatcher.js";
+import { config } from "../config/networks.js";
+
+const router = Router();
+
+// Minimal ERC-20 transfer ABI for building fund transactions
+const ERC20_TRANSFER_ABI = [
+  {
+    name: "transfer",
+    type: "function",
+    inputs: [{ name: "to", type: "address" }, { name: "amount", type: "uint256" }],
+    outputs: [{ name: "", type: "bool" }],
+  },
+];
+
+// ── GET /api/balances/:walletAddress ──────────────────────────────────────────
+
+router.get("/balances/:walletAddress", async (req, res) => {
+  try {
+    const balances = await scanBalances(req.params.walletAddress);
+    res.json(balances);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/quote ───────────────────────────────────────────────────────────
+
+router.post("/quote", async (req, res) => {
+  const { walletAddress, targetAmount } = req.body;
+  if (!walletAddress || !targetAmount) {
+    return res.status(400).json({ error: "walletAddress and targetAmount are required" });
+  }
+  try {
+    const quote = await getQuote(walletAddress, targetAmount);
+    res.json(quote);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/session/create ──────────────────────────────────────────────────
+
+router.post("/session/create", async (req, res) => {
+  const { walletAddress, spendLimitUsdc, expirySeconds = 3600, sourcePlan } = req.body;
+  if (!walletAddress || !spendLimitUsdc) {
+    return res.status(400).json({ error: "walletAddress and spendLimitUsdc are required" });
+  }
+
+  try {
+    const { privateKey, address: sessionAddress } = generateSessionKey();
+    const encryptedKey = encryptKey(privateKey);
+    const expiry = Math.floor(Date.now() / 1000) + expirySeconds;
+
+    // Derive the counterfactual SimpleSmartAccount address for this session key.
+    // SimpleSmartAccount uses CREATE2 with a canonical factory — same address on all chains.
+    const primaryChain = config.sourceChains[0];
+    const smartAccountAddress = await getSmartAccountAddressForKey(privateKey, primaryChain);
+
+    // Index the session key by smartAccountAddress so the orchestrator can look it
+    // up via getSessionKey(job.payer_address) where payer_address = smartAccountAddress.
+    saveSessionKey({
+      wallet_address: smartAccountAddress,
+      encrypted_private_key: encryptedKey,
+      session_address: sessionAddress,
+      allowed_contracts: [],
+      spend_limit: spendLimitUsdc,
+      expiry,
+    });
+
+    // Build one fund transaction per source-plan step.
+    // The user transfers their assets (USDC or native ETH) from their EOA into the
+    // smart account.  The backend then operates the smart account autonomously.
+    const plan =
+      sourcePlan && sourcePlan.length > 0
+        ? sourcePlan
+        : [{ chain: primaryChain.key, type: "usdc", amount: spendLimitUsdc }];
+
+    const fundTxes = [];
+    for (const step of plan) {
+      const chainConfig = config.sourceChains.find((c) => c.key === step.chain);
+      if (!chainConfig) continue;
+
+      if (step.type === "swap") {
+        // User holds native ETH that the smart account will swap to USDC
+        fundTxes.push({
+          chainId: chainConfig.chainId,
+          to: smartAccountAddress,
+          data: "0x",
+          value: parseEther(String(step.fromAmount)).toString(),
+        });
+      } else {
+        // User holds USDC directly — transfer it to the smart account
+        const data = encodeFunctionData({
+          abi: ERC20_TRANSFER_ABI,
+          functionName: "transfer",
+          args: [smartAccountAddress, parseUnits(String(step.amount), 6)],
+        });
+        fundTxes.push({
+          chainId: chainConfig.chainId,
+          to: chainConfig.usdcAddress,
+          data,
+          value: "0",
+        });
+      }
+    }
+
+    res.json({ sessionAddress, smartAccountAddress, expiry, fundTxes });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/pay ─────────────────────────────────────────────────────────────
+
+router.post("/pay", (req, res) => {
+  const { payerAddress, merchantAddress, targetAmount, label, paymentRef, expiresAt } = req.body;
+  if (!payerAddress || !merchantAddress || !targetAmount) {
+    return res.status(400).json({ error: "payerAddress, merchantAddress, targetAmount are required" });
+  }
+
+  try {
+    const jobId = createPaymentJob({ payerAddress, merchantAddress, targetAmount, label, paymentRef, expiresAt });
+    res.status(201).json({ jobId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/pay/:jobId/status ────────────────────────────────────────────────
+
+router.get("/pay/:jobId/status", (req, res) => {
+  const job = getJob(req.params.jobId);
+  if (!job) return res.status(404).json({ error: "Job not found" });
+
+  res.json({
+    jobId: job.id,
+    status: job.status,
+    sourcePlan: job.source_plan,
+    quote: job.quote,
+    txHashes: job.tx_hashes,
+    error: job.error,
+    merchantAddress: job.merchant_address,
+    targetAmount: job.target_amount,
+    label: job.label,
+    expiresAt: job.expires_at,
+    createdAt: job.created_at,
+    updatedAt: job.updated_at,
+  });
+});
+
+// ── GET /api/pay/:jobId/receipt ───────────────────────────────────────────────
+// Public receipt — safe fields only, no session info
+
+router.get("/pay/:jobId/receipt", (req, res) => {
+  const job = getJob(req.params.jobId);
+  if (!job) return res.status(404).json({ error: "Job not found" });
+
+  res.json({
+    jobId: job.id,
+    status: job.status,
+    merchantAddress: job.merchant_address,
+    targetAmount: job.target_amount,
+    label: job.label,
+    merchantReceives: job.quote?.merchantReceives ?? null,
+    txHash: job.tx_hashes?.pay ?? null,
+    expiresAt: job.expires_at,
+    createdAt: job.created_at,
+  });
+});
+
+// ── POST /api/pay/:jobId/confirm ──────────────────────────────────────────────
+
+router.post("/pay/:jobId/confirm", async (req, res) => {
+  try {
+    await confirmAndExecute(req.params.jobId);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── POST /api/pay/:jobId/retry ────────────────────────────────────────────────
+
+router.post("/pay/:jobId/retry", async (req, res) => {
+  try {
+    await retryJob(req.params.jobId);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── POST /api/payment-link/create ────────────────────────────────────────────
+
+router.post("/payment-link/create", async (req, res) => {
+  const { merchantAddress, amount, label, ref, expiryHours } = req.body;
+  if (!merchantAddress || !amount || !label) {
+    return res.status(400).json({ error: "merchantAddress, amount, and label are required" });
+  }
+
+  try {
+    const result = await generatePaymentLink(merchantAddress, amount, label, ref, expiryHours);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/payment-link/verify ─────────────────────────────────────────────
+
+router.get("/payment-link/verify", (req, res) => {
+  const result = verifyPaymentLink(req.query);
+  if (!result.valid) {
+    return res.status(400).json(result);
+  }
+  res.json(result);
+});
+
+// ── POST /api/merchant/register ───────────────────────────────────────────────
+
+router.post("/merchant/register", (req, res) => {
+  const { walletAddress, displayName, logoUrl } = req.body;
+  if (!walletAddress || !displayName) {
+    return res.status(400).json({ error: "walletAddress and displayName are required" });
+  }
+
+  try {
+    const merchant = registerMerchant(walletAddress, displayName, logoUrl);
+    res.status(201).json(merchant);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/merchant/:walletAddress ──────────────────────────────────────────
+
+router.get("/merchant/:walletAddress", (req, res) => {
+  const merchant = getMerchant(req.params.walletAddress);
+  if (!merchant) return res.status(404).json({ error: "Merchant not found" });
+  res.json(merchant);
+});
+
+// ── GET /api/merchant/:walletAddress/payments ─────────────────────────────────
+
+router.get("/merchant/:walletAddress/payments", (req, res) => {
+  const limit = parseInt(req.query.limit ?? "20", 10);
+  const offset = parseInt(req.query.offset ?? "0", 10);
+  const all = req.query.all === "1";
+
+  try {
+    const payments = all
+      ? getMerchantAllPayments(req.params.walletAddress, limit, offset)
+      : getMerchantPayments(req.params.walletAddress, limit, offset);
+    res.json({ payments, limit, offset });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/merchant/split ──────────────────────────────────────────────────
+
+router.post("/merchant/split", (req, res) => {
+  const { walletAddress, splits } = req.body;
+  if (!walletAddress || !splits) {
+    return res.status(400).json({ error: "walletAddress and splits are required" });
+  }
+
+  try {
+    const merchant = setSplitConfig(walletAddress, splits);
+    res.json(merchant);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── GET /api/merchant/:address/split ─────────────────────────────────────────
+
+router.get("/merchant/:address/split", (req, res) => {
+  try {
+    const splits = getSplitConfig(req.params.address);
+    res.json({ splits });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/merchant/webhook ────────────────────────────────────────────────
+
+router.post("/merchant/webhook", (req, res) => {
+  const { walletAddress, webhookUrl } = req.body;
+  if (!walletAddress || !webhookUrl) {
+    return res.status(400).json({ error: "walletAddress and webhookUrl are required" });
+  }
+
+  try {
+    const merchant = updateWebhookUrl(walletAddress, webhookUrl);
+    res.json(merchant);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── POST /api/merchant/webhook/test ──────────────────────────────────────────
+
+router.post("/merchant/webhook/test", async (req, res) => {
+  const { walletAddress } = req.body;
+  if (!walletAddress) {
+    return res.status(400).json({ error: "walletAddress is required" });
+  }
+
+  try {
+    const merchant = getMerchant(walletAddress);
+    if (!merchant?.webhook_url) {
+      return res.status(400).json({ error: "No webhook URL configured" });
+    }
+    const deliveryId = await dispatchTestWebhook(walletAddress, merchant.webhook_url);
+    res.json({ ok: true, deliveryId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/merchant/:address/webhooks ───────────────────────────────────────
+
+router.get("/merchant/:address/webhooks", (req, res) => {
+  try {
+    const deliveries = getMerchantWebhookDeliveries(req.params.address, 20);
+    res.json({ deliveries });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/storefront/slug ─────────────────────────────────────────────────
+
+router.post("/storefront/slug", (req, res) => {
+  const { walletAddress, slug } = req.body;
+  if (!walletAddress || !slug) {
+    return res.status(400).json({ error: "walletAddress and slug are required" });
+  }
+
+  try {
+    const merchant = setupSlug(walletAddress, slug);
+    res.json(merchant);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── GET /api/storefront/:slug ─────────────────────────────────────────────────
+
+router.get("/storefront/:slug", (req, res) => {
+  const storefront = getStorefront(req.params.slug);
+  if (!storefront) return res.status(404).json({ error: "Storefront not found" });
+  res.json(storefront);
+});
+
+// ── POST /api/storefront/product ──────────────────────────────────────────────
+
+router.post("/storefront/product", (req, res) => {
+  const { merchantAddress, name, description, price, imageUrl, sortOrder } = req.body;
+  if (!merchantAddress || !name || !price) {
+    return res.status(400).json({ error: "merchantAddress, name, and price are required" });
+  }
+
+  try {
+    const id = upsertProduct(merchantAddress, { name, description, price, imageUrl, sortOrder });
+    res.status(201).json({ id });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── PUT /api/storefront/product/:id ──────────────────────────────────────────
+
+router.put("/storefront/product/:id", (req, res) => {
+  const { merchantAddress, name, description, price, imageUrl, sortOrder } = req.body;
+  if (!merchantAddress) {
+    return res.status(400).json({ error: "merchantAddress is required" });
+  }
+
+  try {
+    upsertProduct(merchantAddress, { id: req.params.id, name, description, price, imageUrl, sortOrder });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── DELETE /api/storefront/product/:id ───────────────────────────────────────
+
+router.delete("/storefront/product/:id", (req, res) => {
+  const { merchantAddress } = req.body;
+  if (!merchantAddress) {
+    return res.status(400).json({ error: "merchantAddress is required" });
+  }
+
+  try {
+    removeProduct(req.params.id, merchantAddress);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── POST /api/subscriptions ───────────────────────────────────────────────────
+
+router.post("/subscriptions", (req, res) => {
+  const { merchantAddress, payerAddress, amountUsdc, intervalDays, label } = req.body;
+  if (!merchantAddress || !payerAddress || !amountUsdc || !intervalDays) {
+    return res.status(400).json({ error: "merchantAddress, payerAddress, amountUsdc, intervalDays are required" });
+  }
+
+  try {
+    const id = createSubscription(merchantAddress, payerAddress, amountUsdc, intervalDays, label);
+    const appUrl = process.env.APP_URL ?? "http://localhost:5173";
+    res.status(201).json({ id, authorizeUrl: `${appUrl}/subscribe/${id}` });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── GET /api/subscriptions/:id ────────────────────────────────────────────────
+
+router.get("/subscriptions/:id", (req, res) => {
+  const sub = getSubscription(req.params.id);
+  if (!sub) return res.status(404).json({ error: "Subscription not found" });
+  // Don't expose encrypted session key
+  const { encrypted_session_key, ...safe } = sub;
+  res.json(safe);
+});
+
+// ── POST /api/subscriptions/:id/authorize ────────────────────────────────────
+
+router.post("/subscriptions/:id/authorize", (req, res) => {
+  const { walletAddress } = req.body;
+  if (!walletAddress) {
+    return res.status(400).json({ error: "walletAddress (payer) is required" });
+  }
+
+  try {
+    const sub = getSubscription(req.params.id);
+    if (!sub) return res.status(404).json({ error: "Subscription not found" });
+    if (sub.payer_address.toLowerCase() !== walletAddress.toLowerCase()) {
+      return res.status(403).json({ error: "Not the payer for this subscription" });
+    }
+
+    // Read session key from session_keys table (just created via /api/session/create)
+    const sessionKeyRow = getSessionKey(walletAddress);
+    if (!sessionKeyRow) {
+      return res.status(400).json({ error: "No session key found. Call /api/session/create first" });
+    }
+
+    authorizeSubscription(
+      req.params.id,
+      sessionKeyRow.encrypted_private_key,
+      sessionKeyRow.session_address,
+      sessionKeyRow.expiry
+    );
+
+    res.json({ ok: true, subscriptionId: req.params.id });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── POST /api/subscriptions/:id/cancel ───────────────────────────────────────
+
+router.post("/subscriptions/:id/cancel", (req, res) => {
+  const { callerAddress } = req.body;
+  if (!callerAddress) {
+    return res.status(400).json({ error: "callerAddress is required" });
+  }
+
+  try {
+    cancelSubscription(req.params.id, callerAddress);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── GET /api/subscriptions/merchant/:address ──────────────────────────────────
+
+router.get("/subscriptions/merchant/:address", (req, res) => {
+  try {
+    const subs = getMerchantSubscriptions(req.params.address);
+    res.json({ subscriptions: subs.map(({ encrypted_session_key, ...safe }) => safe) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/subscriptions/payer/:address ─────────────────────────────────────
+
+router.get("/subscriptions/payer/:address", (req, res) => {
+  try {
+    const subs = getPayerSubscriptions(req.params.address);
+    res.json({ subscriptions: subs.map(({ encrypted_session_key, ...safe }) => safe) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+export default router;
