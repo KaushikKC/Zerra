@@ -15,7 +15,8 @@ export default function Landing() {
         <div className="hidden md:flex items-center gap-12 text-sm font-bold uppercase tracking-widest text-[#132318]/60">
           <a href="#how-it-works" className="hover:text-[#132318] transition-colors">How it works</a>
           <a href="#features" className="hover:text-[#132318] transition-colors">Features</a>
-          <a href="#trust" className="hover:text-[#132318] transition-colors">Trust</a>
+          <Link to="/store/arc-dev" className="hover:text-[#132318] transition-colors">Demo Store</Link>
+          <Link to="/merchant" className="hover:text-[#132318] transition-colors">Sell</Link>
         </div>
         <Link to="/pay" className="btn-primary py-3 px-8">
           Connect <ArrowRight className="w-5 h-5" />
@@ -41,11 +42,14 @@ export default function Landing() {
             </p>
             <div className="flex flex-wrap gap-6">
               <Link to="/pay" className="btn-primary text-xl px-12 py-6 shadow-2xl shadow-[#132318]/20">
-                Launch App <ArrowRight className="w-6 h-6" />
+                Pay Now <ArrowRight className="w-6 h-6" />
               </Link>
-              <a href="#how-it-works" className="btn-secondary text-xl px-12 py-6">
-                Watch Demo
-              </a>
+              <Link to="/store/arc-dev" className="btn-secondary text-xl px-12 py-6">
+                View Demo Store
+              </Link>
+              <Link to="/merchant" className="btn-secondary text-xl px-12 py-6">
+                Open Your Store
+              </Link>
             </div>
           </div>
           <div className="relative flex justify-center lg:justify-end">
@@ -91,7 +95,7 @@ export default function Landing() {
               {
                 step: '01',
                 title: 'Connect Wallet',
-                desc: 'Link your wallet. We read balances across Ethereum, Base, and Polygon automatically.',
+                desc: 'Link your wallet. We read balances across Ethereum, Base, and Arc automatically.',
                 icon: <Globe className="w-8 h-8" />
               },
               {
@@ -159,6 +163,32 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* Sell on Zerra Section */}
+      <section className="py-48 px-8 md:px-16">
+        <div className="max-w-7xl mx-auto">
+          <div className="fin-card !p-16 md:!p-24 overflow-hidden relative">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-[#E1FF76]/20 rounded-full blur-[80px] -z-10" />
+            <div className="max-w-2xl">
+              <div className="inline-flex items-center gap-3 pill-tag mb-10 shadow-lg border-[#132318]/10 text-[#132318]">
+                <span className="font-black uppercase tracking-[0.2em] text-[10px]">For Creators & Businesses</span>
+              </div>
+              <h2 className="text-5xl md:text-7xl font-black text-[#132318] tracking-tighter mb-8 leading-[0.9]">Sell anything.<br/>Get paid in USDC.</h2>
+              <p className="text-xl text-[#132318]/60 max-w-xl mb-12 leading-relaxed font-medium">
+                Set up your storefront in minutes. List products, accept one-time payments, or create recurring subscriptions. Your customers pay from any chain — you receive Arc USDC.
+              </p>
+              <div className="flex flex-wrap gap-6">
+                <Link to="/merchant" className="btn-primary text-xl px-12 py-6 shadow-2xl shadow-[#132318]/20">
+                  Open Your Store <ArrowRight className="w-6 h-6" />
+                </Link>
+                <Link to="/store/arc-dev" className="btn-secondary text-xl px-12 py-6">
+                  See Example Store
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Footer */}
       <footer className="py-32 px-8 md:px-16 border-t border-[#132318]/5 bg-[#FFFCF5]">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-start gap-20">
@@ -179,7 +209,6 @@ export default function Landing() {
               <ul className="space-y-4 font-bold text-[#132318]/60">
                 <li><a href="#" className="hover:text-[#132318]">Explorer</a></li>
                 <li><a href="#" className="hover:text-[#132318]">Documentation</a></li>
-                <li><Link to="/pitch" className="hover:text-[#132318]">Pitch Deck</Link></li>
                 <li><a href="#" className="hover:text-[#132318]">Protocols</a></li>
               </ul>
             </div>

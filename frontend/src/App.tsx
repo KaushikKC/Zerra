@@ -1,15 +1,14 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Navbar from "./components/Navbar";
-import Landing from "./pages/Landing";
-import Pay from "./pages/Pay";
-import Progress from "./pages/Progress";
-import Success from "./pages/Success";
-import PaymentFailed from "./pages/PaymentFailed";
-import MerchantDashboard from "./pages/MerchantDashboard";
-import Storefront from "./pages/Storefront";
-import Receipt from "./pages/Receipt";
-import SubscriptionAuth from "./pages/SubscriptionAuth";
-import PitchDeck from "./pages/PitchDeck";
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import Navbar from './components/Navbar'
+import Landing from './pages/Landing'
+import Pay from './pages/Pay'
+import Progress from './pages/Progress'
+import Success from './pages/Success'
+import PaymentFailed from './pages/PaymentFailed'
+import MerchantDashboard from './pages/MerchantDashboard'
+import Storefront from './pages/Storefront'
+import Receipt from './pages/Receipt'
+import SubscriptionAuth from './pages/SubscriptionAuth'
 
 function AppLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -17,7 +16,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
       <Navbar />
       <main>{children}</main>
     </div>
-  );
+  )
 }
 
 export default function App() {
@@ -89,8 +88,7 @@ export default function App() {
             </AppLayout>
           }
         />
-        <Route path="/pitch" element={<PitchDeck />} />
       </Routes>
     </BrowserRouter>
-  );
+  )
 }

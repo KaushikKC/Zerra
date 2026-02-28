@@ -31,11 +31,13 @@ interface LinkParams {
 // ── Chain display helpers ─────────────────────────────────────────────────────
 
 const CHAIN_LABELS: Record<string, string> = {
+  'arc-testnet': 'Arc Testnet',
   'ethereum-sepolia': 'Ethereum Sepolia',
   'base-sepolia': 'Base Sepolia',
 }
 
 function ChainIcon({ chain }: { chain: string }) {
+  if (chain.includes('arc')) return <ShieldCheck className="w-5 h-5" />
   if (chain.includes('base')) return <Layers className="w-5 h-5" />
   return <Database className="w-5 h-5" />
 }
@@ -123,7 +125,9 @@ export default function Pay() {
     setAuthError(null)
 
     try {
-      // 1. Create session key — backend derives smart account address + fund txes
+      // 1. Create session key — backend derives payer address + fund txes.
+      //    For Arc-direct: payerAddress = sessionAddress (EOA on Arc).
+      //    For cross-chain: payerAddress = smartAccountAddress (ERC-4337).
       const sessionRes = await fetch(`${API_BASE}/api/session/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -135,11 +139,11 @@ export default function Pay() {
         }),
       })
       if (!sessionRes.ok) throw new Error('Failed to create session key')
-      const { smartAccountAddress, fundTxes } = await sessionRes.json()
+      const { payerAddress, fundTxes } = await sessionRes.json()
 
-      // 2. Send fund transactions — transfers assets from EOA to smart account.
-      //    Wait for each tx to be CONFIRMED on-chain before continuing so the
-      //    backend balance scan sees the USDC in the smart account.
+      // 2. Send fund transactions — user signs each tx to transfer assets.
+      //    Arc-direct: transfer USDC to session key EOA on Arc.
+      //    Cross-chain: transfer USDC/ETH to smart account on source chains.
       for (const tx of fundTxes) {
         const hash = await sendTransactionAsync({
           to: tx.to as `0x${string}`,
@@ -150,12 +154,12 @@ export default function Pay() {
         await waitForTransactionReceipt(wagmiConfig, { hash, chainId: tx.chainId })
       }
 
-      // 3. Start the payment job using the smart account as payer
+      // 3. Start the payment job — backend orchestrator takes it from here
       const payRes = await fetch(`${API_BASE}/api/pay`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          payerAddress: smartAccountAddress,
+          payerAddress,
           merchantAddress: linkParams.to,
           targetAmount: linkParams.amount,
           label: linkParams.label,
@@ -373,9 +377,11 @@ export default function Pay() {
                 </button>
                 <div className="text-center space-y-2">
                   <p className="text-[10px] font-black uppercase tracking-[0.3em] text-[#132318] leading-relaxed">
-                    {quote.sourcePlan.length > 1
-                      ? `${quote.sourcePlan.length} wallet signatures. No manual bridging.`
-                      : 'One wallet signature. No manual bridging.'}
+                    {(quote as { isDirect?: boolean }).isDirect
+                      ? 'Direct on Arc — no bridging needed.'
+                      : quote.sourcePlan.length > 1
+                        ? `${quote.sourcePlan.length} wallet signatures. No manual bridging.`
+                        : 'One wallet signature. No manual bridging.'}
                   </p>
                   <p className="text-[10px] font-bold text-[#132318]/30 uppercase tracking-[0.1em]">
                     Session key expires in 1 hour.
@@ -389,7 +395,9 @@ export default function Pay() {
 
       <div className="mt-16 text-center">
         <p className="text-[10px] font-black uppercase tracking-[0.5em] text-[#132318]/20">
-          Powered by Circle Gateway · Arc Network
+          {(quote as { isDirect?: boolean } | null)?.isDirect
+            ? 'Direct on Arc · Powered by Zerra'
+            : 'Powered by Circle Gateway · Arc Network'}
         </p>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ShoppingCart, Loader2, Package } from 'lucide-react'
+import { ShoppingCart, Loader2, Package, RefreshCw } from 'lucide-react'
 import { API_BASE } from '../config/wagmiConfig'
 
 interface Product {
@@ -9,6 +9,8 @@ interface Product {
   description: string | null
   price: string
   imageUrl: string | null
+  type: string
+  intervalDays: number | null
 }
 
 interface Merchant {
@@ -66,6 +68,17 @@ export default function Storefront() {
     }
   }
 
+  const handleSubscribe = (product: Product) => {
+    if (!data) return
+    const params = new URLSearchParams({
+      merchantAddress: data.merchant.walletAddress,
+      amount: product.price,
+      intervalDays: String(product.intervalDays ?? 30),
+      label: product.name,
+    })
+    navigate(`/subscribe/new?${params.toString()}`)
+  }
+
   if (notFound) {
     return (
       <div className="mx-auto max-w-2xl px-6 py-40 text-center">
@@ -119,7 +132,7 @@ export default function Storefront() {
             <ProductCard
               key={product.id}
               product={product}
-              onBuy={() => handleBuyNow(product)}
+              onBuy={() => product.type === 'subscription' ? handleSubscribe(product) : handleBuyNow(product)}
               loading={buying === product.id}
             />
           ))}
@@ -138,6 +151,7 @@ function ProductCard({
   onBuy: () => void
   loading: boolean
 }) {
+  const isSub = product.type === 'subscription'
   return (
     <div className="fin-card flex flex-col gap-4">
       {product.imageUrl ? (
@@ -148,19 +162,34 @@ function ProductCard({
         />
       ) : (
         <div className="w-full h-40 rounded-2xl bg-[#132318]/5 flex items-center justify-center">
-          <Package className="w-10 h-10 text-[#132318]/20" />
+          {isSub
+            ? <RefreshCw className="w-10 h-10 text-[#132318]/20" />
+            : <Package className="w-10 h-10 text-[#132318]/20" />
+          }
         </div>
       )}
       <div className="flex-1">
-        <h3 className="font-black text-[#132318] text-lg tracking-tight">{product.name}</h3>
+        <div className="flex items-start gap-2 mb-1">
+          <h3 className="font-black text-[#132318] text-lg tracking-tight flex-1">{product.name}</h3>
+          {isSub && (
+            <span className="inline-block px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider bg-[#E1FF76] text-[#132318] whitespace-nowrap flex-shrink-0">
+              Recurring
+            </span>
+          )}
+        </div>
         {product.description && (
           <p className="text-sm text-[#132318]/50 mt-1 leading-relaxed">{product.description}</p>
         )}
       </div>
       <div className="flex items-center justify-between gap-4 pt-2 border-t border-[#132318]/5">
-        <span className="text-2xl font-black text-[#132318]">
-          {product.price} <span className="text-base text-[#132318]/40">USDC</span>
-        </span>
+        <div>
+          <span className="text-2xl font-black text-[#132318]">{product.price}</span>
+          {' '}
+          <span className="text-base text-[#132318]/40">USDC</span>
+          {isSub && (
+            <span className="text-sm text-[#132318]/40 font-bold"> / mo</span>
+          )}
+        </div>
         <button
           onClick={onBuy}
           disabled={loading}
@@ -168,6 +197,8 @@ function ProductCard({
         >
           {loading ? (
             <Loader2 className="w-5 h-5 animate-spin" />
+          ) : isSub ? (
+            <><RefreshCw className="w-4 h-4" /> Subscribe</>
           ) : (
             <><ShoppingCart className="w-5 h-5" /> Buy</>
           )}

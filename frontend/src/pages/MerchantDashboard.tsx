@@ -39,6 +39,8 @@ interface Product {
   description: string
   price: string
   imageUrl: string
+  type: string
+  intervalDays: string
 }
 
 interface SplitRecipient {
@@ -111,7 +113,7 @@ export default function MerchantDashboard() {
   const [slugSaving, setSlugSaving] = useState(false)
   const [slugMsg, setSlugMsg] = useState('')
   const [products, setProducts] = useState<Product[]>([])
-  const [productForm, setProductForm] = useState<Product>({ name: '', description: '', price: '', imageUrl: '' })
+  const [productForm, setProductForm] = useState<Product>({ name: '', description: '', price: '', imageUrl: '', type: 'one_time', intervalDays: '30' })
   const [productSaving, setProductSaving] = useState(false)
   const [editingProductId, setEditingProductId] = useState<string | null>(null)
 
@@ -131,9 +133,8 @@ export default function MerchantDashboard() {
   const [subAmount, setSubAmount] = useState('')
   const [subInterval, setSubInterval] = useState('30')
   const [subLabel, setSubLabel] = useState('')
-  const [subPayerAddress, setSubPayerAddress] = useState('')
-  const [subCreating, setSubCreating] = useState(false)
   const [subLink, setSubLink] = useState('')
+  const [subCopied, setSubCopied] = useState(false)
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([])
 
   // ── Load merchant on wallet connect ────────────────────────────────────────
@@ -275,10 +276,15 @@ export default function MerchantDashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           merchantAddress: merchant.wallet_address,
-          ...productForm,
+          name: productForm.name,
+          description: productForm.description,
+          price: productForm.price,
+          imageUrl: productForm.imageUrl,
+          type: productForm.type,
+          intervalDays: productForm.type === 'subscription' ? parseInt(productForm.intervalDays, 10) : null,
         }),
       })
-      setProductForm({ name: '', description: '', price: '', imageUrl: '' })
+      setProductForm({ name: '', description: '', price: '', imageUrl: '', type: 'one_time', intervalDays: '30' })
       setEditingProductId(null)
       loadProducts()
     } finally { setProductSaving(false) }
@@ -347,28 +353,21 @@ export default function MerchantDashboard() {
   }
 
   // ── Subscriptions ───────────────────────────────────────────────────────────
-  const handleCreateSub = async () => {
-    if (!merchant || !subAmount || !subInterval || !subPayerAddress) return
-    setSubCreating(true)
-    setSubLink('')
-    try {
-      const res = await fetch(`${API_BASE}/api/subscriptions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          merchantAddress: merchant.wallet_address,
-          payerAddress: subPayerAddress,
-          amountUsdc: subAmount,
-          intervalDays: parseInt(subInterval, 10),
-          label: subLabel || null,
-        }),
-      })
-      const data = await res.json()
-      if (res.ok) {
-        setSubLink(data.authorizeUrl)
-        loadSubscriptions()
-      }
-    } finally { setSubCreating(false) }
+  const handleGenerateSubLink = () => {
+    if (!merchant || !subAmount || !subInterval) return
+    const params = new URLSearchParams({
+      merchantAddress: merchant.wallet_address,
+      amount: subAmount,
+      intervalDays: subInterval,
+      ...(subLabel ? { label: subLabel } : {}),
+    })
+    setSubLink(`${appUrl}/subscribe/new?${params.toString()}`)
+  }
+
+  const handleCopySubLink = () => {
+    navigator.clipboard.writeText(subLink)
+    setSubCopied(true)
+    setTimeout(() => setSubCopied(false), 2000)
   }
 
   // ── Not connected ───────────────────────────────────────────────────────────
@@ -637,9 +636,22 @@ export default function MerchantDashboard() {
                     <input className="input-field" placeholder="Product name" value={productForm.name} onChange={(e) => setProductForm({ ...productForm, name: e.target.value })} />
                   </div>
                   <div>
+                    <label className="text-label mb-2 block text-sm">Type <span className="text-red-400">*</span></label>
+                    <select className="input-field" value={productForm.type} onChange={(e) => setProductForm({ ...productForm, type: e.target.value })}>
+                      <option value="one_time">One-time purchase</option>
+                      <option value="subscription">Recurring subscription</option>
+                    </select>
+                  </div>
+                  <div>
                     <label className="text-label mb-2 block text-sm">Price (USDC) <span className="text-red-400">*</span></label>
                     <input className="input-field" type="number" placeholder="0.00" value={productForm.price} onChange={(e) => setProductForm({ ...productForm, price: e.target.value })} />
                   </div>
+                  {productForm.type === 'subscription' && (
+                    <div>
+                      <label className="text-label mb-2 block text-sm">Billing interval (days) <span className="text-red-400">*</span></label>
+                      <input className="input-field" type="number" min="1" placeholder="30" value={productForm.intervalDays} onChange={(e) => setProductForm({ ...productForm, intervalDays: e.target.value })} />
+                    </div>
+                  )}
                   <div className="sm:col-span-2">
                     <label className="text-label mb-2 block text-sm">Description</label>
                     <input className="input-field" placeholder="Short description" value={productForm.description} onChange={(e) => setProductForm({ ...productForm, description: e.target.value })} />
@@ -654,7 +666,7 @@ export default function MerchantDashboard() {
                     {productSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Plus className="w-5 h-5" /> {editingProductId ? 'Update' : 'Add'} Product</>}
                   </button>
                   {editingProductId && (
-                    <button onClick={() => { setEditingProductId(null); setProductForm({ name: '', description: '', price: '', imageUrl: '' }) }} className="btn-secondary py-4 px-6">Cancel</button>
+                    <button onClick={() => { setEditingProductId(null); setProductForm({ name: '', description: '', price: '', imageUrl: '', type: 'one_time', intervalDays: '30' }) }} className="btn-secondary py-4 px-6">Cancel</button>
                   )}
                 </div>
               </div>
@@ -673,12 +685,22 @@ export default function MerchantDashboard() {
                         </div>
                       )}
                       <div className="flex-1 min-w-0">
-                        <p className="font-black text-[#132318] truncate">{p.name}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="font-black text-[#132318] truncate">{p.name}</p>
+                          {p.type === 'subscription' && (
+                            <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-[#E1FF76] text-[#132318] flex-shrink-0">Sub</span>
+                          )}
+                        </div>
                         {p.description && <p className="text-sm text-[#132318]/40 truncate">{p.description}</p>}
                       </div>
-                      <span className="font-black text-[#132318] whitespace-nowrap">{p.price} USDC</span>
+                      <div className="text-right flex-shrink-0">
+                        <span className="font-black text-[#132318] whitespace-nowrap">{p.price} USDC</span>
+                        {p.type === 'subscription' && p.interval_days && (
+                          <p className="text-[10px] text-[#132318]/40 font-bold">/ {p.interval_days}d</p>
+                        )}
+                      </div>
                       <div className="flex gap-2">
-                        <button onClick={() => { setEditingProductId(p.id); setProductForm({ name: p.name, description: p.description ?? '', price: p.price, imageUrl: p.imageUrl ?? '' }) }} className="p-2 rounded-lg hover:bg-[#132318]/5 transition-colors">
+                        <button onClick={() => { setEditingProductId(p.id); setProductForm({ name: p.name, description: p.description ?? '', price: p.price, imageUrl: p.imageUrl ?? '', type: p.type ?? 'one_time', intervalDays: String(p.interval_days ?? 30) }) }} className="p-2 rounded-lg hover:bg-[#132318]/5 transition-colors">
                           <Tag className="w-4 h-4 text-[#132318]/40" />
                         </button>
                         <button onClick={() => handleDeleteProduct(p.id)} className="p-2 rounded-lg hover:bg-red-50 transition-colors">
@@ -697,39 +719,53 @@ export default function MerchantDashboard() {
       {/* ── TAB: Subscriptions ────────────────────────────────────────────── */}
       {activeTab === 'subscriptions' && (
         <div className="space-y-10">
-          {/* Create subscription */}
+          {/* Generate subscription link */}
           <div className="fin-card space-y-6">
-            <h2 className="font-black text-[#132318] text-xl tracking-tight">Create Subscription</h2>
+            <div>
+              <h2 className="font-black text-[#132318] text-xl tracking-tight">Create Subscription Plan</h2>
+              <p className="text-sm text-[#132318]/50 mt-2">
+                Set up a recurring payment plan and share a link with your customers. They connect their wallet and authorize once — you get charged automatically on each billing cycle.
+              </p>
+            </div>
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
                 <label className="text-label mb-2 block text-sm">Amount (USDC) <span className="text-red-400">*</span></label>
-                <input className="input-field" type="number" placeholder="10.00" value={subAmount} onChange={(e) => setSubAmount(e.target.value)} />
+                <div className="relative">
+                  <input className="input-field !pr-20" type="number" placeholder="9.00" value={subAmount} onChange={(e) => setSubAmount(e.target.value)} />
+                  <span className="absolute right-5 top-1/2 -translate-y-1/2 font-black text-[#132318]/30 text-sm">USDC</span>
+                </div>
               </div>
               <div>
-                <label className="text-label mb-2 block text-sm">Interval (days) <span className="text-red-400">*</span></label>
-                <input className="input-field" type="number" min="1" placeholder="30" value={subInterval} onChange={(e) => setSubInterval(e.target.value)} />
+                <label className="text-label mb-2 block text-sm">Billing interval <span className="text-red-400">*</span></label>
+                <select className="input-field" value={subInterval} onChange={(e) => setSubInterval(e.target.value)}>
+                  <option value="7">Weekly (7 days)</option>
+                  <option value="30">Monthly (30 days)</option>
+                  <option value="90">Quarterly (90 days)</option>
+                  <option value="365">Yearly (365 days)</option>
+                </select>
               </div>
               <div className="sm:col-span-2">
-                <label className="text-label mb-2 block text-sm">Payer Address <span className="text-red-400">*</span></label>
-                <input className="input-field font-mono" placeholder="0x..." value={subPayerAddress} onChange={(e) => setSubPayerAddress(e.target.value)} />
-              </div>
-              <div className="sm:col-span-2">
-                <label className="text-label mb-2 block text-sm">Label <span className="text-[#132318]/30">(optional)</span></label>
-                <input className="input-field" placeholder="Monthly plan" value={subLabel} onChange={(e) => setSubLabel(e.target.value)} />
+                <label className="text-label mb-2 block text-sm">Plan name <span className="text-[#132318]/30">(optional)</span></label>
+                <input className="input-field" placeholder="e.g. Developer Pro Monthly" value={subLabel} onChange={(e) => setSubLabel(e.target.value)} />
               </div>
             </div>
-            <button onClick={handleCreateSub} disabled={subCreating || !subAmount || !subInterval || !subPayerAddress} className="btn-primary py-4 px-6 disabled:opacity-50">
-              {subCreating ? <><Loader2 className="w-5 h-5 animate-spin" /> Creating…</> : <><Plus className="w-5 h-5" /> Create Subscription</>}
+            <button
+              onClick={handleGenerateSubLink}
+              disabled={!subAmount || !subInterval}
+              className="btn-primary py-4 px-6 disabled:opacity-50"
+            >
+              <Plus className="w-5 h-5" /> Generate Subscribe Link
             </button>
             {subLink && (
-              <div className="p-4 rounded-2xl bg-green-50 border border-green-100 space-y-2">
-                <p className="text-sm font-black text-green-700">Share this link with your customer to authorize:</p>
-                <div className="flex items-center gap-3">
-                  <p className="font-mono text-xs text-green-600 truncate flex-1">{subLink}</p>
-                  <button onClick={() => navigator.clipboard.writeText(subLink)} className="p-2 rounded-lg hover:bg-green-100">
-                    <Copy className="w-4 h-4 text-green-600" />
+              <div className="p-5 rounded-2xl bg-[#E1FF76]/20 border border-[#E1FF76] space-y-3">
+                <p className="text-sm font-black text-[#132318]">Share this link with your customers:</p>
+                <div className="flex items-center gap-3 p-3 rounded-xl bg-white/60 border border-[#132318]/10">
+                  <p className="font-mono text-xs text-[#132318]/60 truncate flex-1">{subLink}</p>
+                  <button onClick={handleCopySubLink} className="p-2 rounded-lg hover:bg-[#E1FF76]/50 transition-colors flex-shrink-0">
+                    {subCopied ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4 text-[#132318]/50" />}
                   </button>
                 </div>
+                <p className="text-xs text-[#132318]/40">Customers visiting this link will connect their wallet and authorize one-click recurring payments.</p>
               </div>
             )}
           </div>
@@ -737,7 +773,7 @@ export default function MerchantDashboard() {
           {/* Subscription list */}
           {subscriptions.length > 0 && (
             <div className="space-y-3">
-              <h2 className="text-label">Active Subscriptions</h2>
+              <h2 className="text-label">Active Subscribers ({subscriptions.filter(s => s.status === 'ACTIVE').length})</h2>
               {subscriptions.map((s) => (
                 <div key={s.id} className="fin-card !p-5 space-y-2">
                   <div className="flex items-center justify-between">
