@@ -3,6 +3,14 @@ import { useParams } from 'react-router-dom'
 import { CheckCircle2, Clock, XCircle, AlertTriangle, ExternalLink, Loader2 } from 'lucide-react'
 import { API_BASE } from '../config/wagmiConfig'
 
+interface SourceStep {
+  chain: string
+  type: 'usdc' | 'swap'
+  amount?: string
+  toUsdc?: string
+  isDirect?: boolean
+}
+
 interface Receipt {
   jobId: string
   status: string
@@ -11,8 +19,17 @@ interface Receipt {
   label: string | null
   merchantReceives: string | null
   txHash: string | null
+  sourcePlan: SourceStep[] | null
   expiresAt: number | null
   createdAt: number
+}
+
+const CHAIN_META: Record<string, { label: string; color: string }> = {
+  'arc-testnet':        { label: 'Arc Testnet',        color: 'bg-indigo-100 text-indigo-700' },
+  'ethereum-sepolia':   { label: 'Ethereum Sepolia',   color: 'bg-blue-100 text-blue-700' },
+  'base-sepolia':       { label: 'Base Sepolia',        color: 'bg-sky-100 text-sky-700' },
+  ethereum:             { label: 'Ethereum',            color: 'bg-blue-100 text-blue-700' },
+  base:                 { label: 'Base',                color: 'bg-sky-100 text-sky-700' },
 }
 
 const TERMINAL = new Set(['COMPLETE', 'FAILED', 'EXPIRED'])
@@ -127,6 +144,40 @@ export default function Receipt() {
           >
             <ExternalLink className="w-5 h-5" /> View on ArcScan
           </a>
+        )}
+
+        {/* Chain Provenance Panel */}
+        {receipt.status === 'COMPLETE' && receipt.sourcePlan && receipt.sourcePlan.length > 0 && (
+          <div className="space-y-3 border-t border-[#132318]/5 pt-6">
+            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-[#132318]/40">
+              Liquidity Sources
+            </p>
+            {receipt.sourcePlan.map((step, i) => {
+              const meta = CHAIN_META[step.chain] ?? { label: step.chain, color: 'bg-gray-100 text-gray-600' }
+              const amount = step.type === 'swap' ? step.toUsdc : step.amount
+              const typeLabel = step.isDirect ? 'Direct USDC' : step.type === 'swap' ? 'Swap → USDC' : 'USDC Bridge'
+              return (
+                <div key={i} className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <span className={`inline-block px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider ${meta.color}`}>
+                      {meta.label}
+                    </span>
+                    <span className="text-xs text-[#132318]/40 font-medium">{typeLabel}</span>
+                  </div>
+                  <span className="text-sm font-black text-[#132318] font-mono">{amount ?? '—'} USDC</span>
+                </div>
+              )
+            })}
+            <div className="flex items-center justify-between gap-4 pt-2 border-t border-[#132318]/5">
+              <div className="flex items-center gap-3">
+                <span className="inline-block px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider bg-[#132318] text-[#E1FF76]">
+                  Arc Testnet
+                </span>
+                <span className="text-xs text-[#132318]/40 font-medium">Settled on Arc</span>
+              </div>
+              <span className="text-sm font-black text-[#132318] font-mono">{receipt.merchantReceives ?? receipt.targetAmount} USDC</span>
+            </div>
+          </div>
         )}
 
         {/* Pending state message */}

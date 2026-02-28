@@ -34,6 +34,7 @@ export interface PaymentJob {
   } | null
   txHashes: TxHashes | null
   error: string | null
+  payerAddress: string
   merchantAddress: string
   targetAmount: string
   label: string | null

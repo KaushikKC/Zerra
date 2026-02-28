@@ -1,7 +1,29 @@
 import { Link } from 'react-router-dom'
 import { ArrowRight, Globe, Zap, Shield } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { API_BASE } from '../config/wagmiConfig'
+
+interface PlatformStats {
+  totalPayments: number
+  totalUsdcSettled: string
+  chainsAbstracted: number
+  merchantCount: number
+}
 
 export default function Landing() {
+  const [stats, setStats] = useState<PlatformStats | null>(null)
+
+  useEffect(() => {
+    const fetchStats = () =>
+      fetch(`${API_BASE}/api/stats`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => d && setStats(d))
+        .catch(() => {})
+    fetchStats()
+    const id = setInterval(fetchStats, 30_000)
+    return () => clearInterval(id)
+  }, [])
+
   return (
     <div className="min-h-screen selection:bg-fin-lime selection:text-fin-dark">
       {/* Navigation */}
@@ -51,6 +73,23 @@ export default function Landing() {
               <Link to="/merchant" className="btn-secondary text-xl px-12 py-6">
                 Open Your Store
               </Link>
+            </div>
+
+            {/* Live Stats Strip */}
+            <div className="mt-10 flex flex-wrap items-center gap-x-6 gap-y-2 text-[#132318]/50 font-bold text-sm">
+              {stats ? (
+                <>
+                  <span className="font-black text-[#132318]">{stats.totalPayments}</span> Payments
+                  <span className="text-[#132318]/20">·</span>
+                  <span className="font-black text-[#132318]">${stats.totalUsdcSettled}</span> USDC Settled
+                  <span className="text-[#132318]/20">·</span>
+                  <span className="font-black text-[#132318]">{stats.chainsAbstracted}</span> Chains Abstracted
+                  <span className="text-[#132318]/20">·</span>
+                  <span className="font-black text-[#132318]">{stats.merchantCount}</span> Merchants
+                </>
+              ) : (
+                <span className="text-[#132318]/20 animate-pulse">Loading stats…</span>
+              )}
             </div>
           </div>
           <div className="relative flex justify-center lg:justify-end">

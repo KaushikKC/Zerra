@@ -180,6 +180,7 @@ router.get("/pay/:jobId/status", async (req, res) => {
     quote: job.quote,
     txHashes: job.tx_hashes,
     error: job.error,
+    payerAddress: job.payer_address,
     merchantAddress: job.merchant_address,
     targetAmount: job.target_amount,
     label: job.label,

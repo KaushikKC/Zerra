@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { useAccount } from "wagmi";
+import { useAccount, useSignMessage } from "wagmi";
 import {
   Copy,
   Check,
@@ -23,6 +23,10 @@ import {
   CheckCircle2,
   ArrowRight,
   Sparkles,
+  Send,
+  BarChart2,
+  Banknote,
+  X,
 } from "lucide-react";
 import { API_BASE } from "../config/wagmiConfig";
 
