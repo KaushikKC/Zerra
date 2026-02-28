@@ -2,10 +2,11 @@ import { scanBalances } from "../scanner/balanceScanner.js";
 import { getSwapProvider } from "../swap/swapProvider.js";
 import { config } from "../config/networks.js";
 
-// Fixed Gateway bridge fee estimate (USDC) — replaced with real API data when available
-const GATEWAY_BRIDGE_FEE_USDC = 2.0;
-// Arc gas cost in USDC — Arc uses USDC as gas token
-const ARC_GAS_FEE_USDC = 0.43;
+// Circle Bridge Kit (CCTPv2) fee estimate — fast transfer ~1 bps of amount.
+// Use 0.1 USDC as a conservative fixed buffer across all test amounts.
+const GATEWAY_BRIDGE_FEE_USDC = 0.1;
+// Arc gas cost in USDC — session key EOA pays directly; Arc uses USDC as gas token.
+const ARC_GAS_FEE_USDC = 0.1;
 // Fee buffer multiplier applied to all fee estimates
 const FEE_BUFFER = 1.1;
 // Gas buffer for Arc-direct payments (session key EOA pays Arc USDC gas)

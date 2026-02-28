@@ -10,7 +10,7 @@ import {
 /**
  * Register or update a merchant profile.
  */
-export function registerMerchant(walletAddress, displayName, logoUrl = null) {
+export async function registerMerchant(walletAddress, displayName, logoUrl = null) {
   if (!walletAddress || !displayName) {
     throw new Error("walletAddress and displayName are required");
   }
@@ -20,32 +20,32 @@ export function registerMerchant(walletAddress, displayName, logoUrl = null) {
 /**
  * Get a merchant profile by wallet address.
  */
-export function getMerchant(walletAddress) {
+export async function getMerchant(walletAddress) {
   return dbGetMerchant(walletAddress);
 }
 
 /**
  * Get paginated completed payment history for a merchant.
  */
-export function getMerchantPayments(walletAddress, limit = 20, offset = 0) {
+export async function getMerchantPayments(walletAddress, limit = 20, offset = 0) {
   return dbGetMerchantPayments(walletAddress, limit, offset);
 }
 
 /**
  * Get paginated payment history (all statuses) for a merchant.
  */
-export function getMerchantAllPayments(walletAddress, limit = 20, offset = 0) {
+export async function getMerchantAllPayments(walletAddress, limit = 20, offset = 0) {
   return dbGetMerchantAllPayments(walletAddress, limit, offset);
 }
 
 /**
  * Set or update the merchant's webhook URL.
  */
-export function updateWebhookUrl(walletAddress, webhookUrl) {
+export async function updateWebhookUrl(walletAddress, webhookUrl) {
   if (!walletAddress || !webhookUrl) {
     throw new Error("walletAddress and webhookUrl are required");
   }
-  dbSetWebhookUrl(walletAddress, webhookUrl);
+  await dbSetWebhookUrl(walletAddress, webhookUrl);
   return dbGetMerchant(walletAddress);
 }
 
@@ -53,7 +53,7 @@ export function updateWebhookUrl(walletAddress, webhookUrl) {
  * Set the split payment config for a merchant.
  * splits must be an array of { address, bps } summing to 10000.
  */
-export function setSplitConfig(walletAddress, splits) {
+export async function setSplitConfig(walletAddress, splits) {
   if (!Array.isArray(splits) || splits.length === 0) {
     throw new Error("splits must be a non-empty array");
   }
@@ -66,15 +66,15 @@ export function setSplitConfig(walletAddress, splits) {
       throw new Error("Each split must have address (string) and bps (number)");
     }
   }
-  dbSetSplitConfig(walletAddress, splits);
+  await dbSetSplitConfig(walletAddress, splits);
   return dbGetMerchant(walletAddress);
 }
 
 /**
  * Get the split config for a merchant (returns null if none set).
  */
-export function getSplitConfig(walletAddress) {
-  const merchant = dbGetMerchant(walletAddress);
+export async function getSplitConfig(walletAddress) {
+  const merchant = await dbGetMerchant(walletAddress);
   if (!merchant?.split_config) return null;
   try {
     return JSON.parse(merchant.split_config);

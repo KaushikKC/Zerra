@@ -25,7 +25,7 @@ function signPayload(body) {
  */
 export async function dispatchWebhook(job) {
   try {
-    const merchant = getMerchant(job.merchant_address);
+    const merchant = await getMerchant(job.merchant_address);
     if (!merchant?.webhook_url) return; // No webhook configured
 
     const webhookUrl = merchant.webhook_url;
@@ -43,7 +43,7 @@ export async function dispatchWebhook(job) {
     };
 
     const deliveryId = randomUUID();
-    saveWebhookDelivery({
+    await saveWebhookDelivery({
       id: deliveryId,
       job_id: job.id,
       url: webhookUrl,
@@ -93,7 +93,7 @@ async function _attemptDelivery(deliveryId, url, payload, attempt) {
   const newAttempts = attempt + 1;
 
   if (success) {
-    updateWebhookDelivery(deliveryId, {
+    await updateWebhookDelivery(deliveryId, {
       status: "DELIVERED",
       response_code: responseCode,
       attempts: newAttempts,
@@ -104,7 +104,7 @@ async function _attemptDelivery(deliveryId, url, payload, attempt) {
   }
 
   if (newAttempts >= MAX_ATTEMPTS) {
-    updateWebhookDelivery(deliveryId, {
+    await updateWebhookDelivery(deliveryId, {
       status: "FAILED",
       response_code: responseCode,
       attempts: newAttempts,
@@ -117,7 +117,7 @@ async function _attemptDelivery(deliveryId, url, payload, attempt) {
   // Exponential backoff before retry
   const backoffMs = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
   console.log(`[webhook] Attempt ${newAttempts} failed (${lastError}), retrying in ${backoffMs}ms`);
-  updateWebhookDelivery(deliveryId, {
+  await updateWebhookDelivery(deliveryId, {
     status: "PENDING",
     response_code: responseCode,
     attempts: newAttempts,
@@ -145,7 +145,7 @@ export async function dispatchTestWebhook(merchantAddress, webhookUrl) {
   };
 
   const deliveryId = randomUUID();
-  saveWebhookDelivery({
+  await saveWebhookDelivery({
     id: deliveryId,
     job_id: payload.jobId,
     url: webhookUrl,

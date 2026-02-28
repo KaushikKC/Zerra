@@ -39,12 +39,23 @@ app.listen(PORT, async () => {
   }
 
   // Expire stale payment jobs on startup
-  const expired = expireStaleJobs();
-  if (expired > 0) console.log(`Expired ${expired} stale job(s)`);
+  try {
+    const expired = await expireStaleJobs();
+    if (expired > 0) console.log(`Expired ${expired} stale job(s)`);
+  } catch (err) {
+    if (err?.code === "ENOTFOUND" || err?.message?.includes("getaddrinfo")) {
+      console.error("");
+      console.error("Cannot reach Supabase database (ENOTFOUND). Use the Session pooler URL, not Direct:");
+      console.error("  Supabase Dashboard → Connect → choose \"Session\" mode");
+      console.error("  Host should be: aws-0-<region>.pooler.supabase.com (not db.xxx.supabase.co)");
+      console.error("");
+    }
+    throw err;
+  }
 
   // Expire stale jobs every 5 minutes
-  setInterval(() => {
-    const n = expireStaleJobs();
+  setInterval(async () => {
+    const n = await expireStaleJobs();
     if (n > 0) console.log(`[scheduler] Expired ${n} stale job(s)`);
   }, 5 * 60 * 1000);
 

@@ -15,7 +15,7 @@ import { createPaymentJobAutoExecute } from "../orchestrator/paymentOrchestrator
 /**
  * Create a new subscription (without session key — payer must authorize separately).
  */
-export function createSubscription(merchantAddress, payerAddress, amountUsdc, intervalDays, label) {
+export async function createSubscription(merchantAddress, payerAddress, amountUsdc, intervalDays, label) {
   if (!merchantAddress || !payerAddress || !amountUsdc || !intervalDays) {
     throw new Error("merchantAddress, payerAddress, amountUsdc, intervalDays are required");
   }
@@ -24,7 +24,7 @@ export function createSubscription(merchantAddress, payerAddress, amountUsdc, in
   const id = randomUUID();
   const nextChargeAt = Date.now() + intervalDays * 24 * 60 * 60 * 1000;
 
-  createSubscriptionDb({
+  await createSubscriptionDb({
     id,
     merchant_address: merchantAddress,
     payer_address: payerAddress,
@@ -41,40 +41,40 @@ export function createSubscription(merchantAddress, payerAddress, amountUsdc, in
  * Authorize a subscription — stores the payer's encrypted session key.
  * Called after the payer grants a session key via the frontend.
  */
-export function authorizeSubscription(subscriptionId, encryptedSessionKey, sessionAddress, sessionExpiry) {
-  const sub = getSubscriptionDb(subscriptionId);
+export async function authorizeSubscription(subscriptionId, encryptedSessionKey, sessionAddress, sessionExpiry) {
+  const sub = await getSubscriptionDb(subscriptionId);
   if (!sub) throw new Error(`Subscription ${subscriptionId} not found`);
   if (sub.status !== "ACTIVE") throw new Error("Subscription is not active");
 
-  authorizeSubscriptionDb(subscriptionId, encryptedSessionKey, sessionAddress, sessionExpiry);
+  await authorizeSubscriptionDb(subscriptionId, encryptedSessionKey, sessionAddress, sessionExpiry);
 }
 
 /**
  * Get a subscription by ID.
  */
-export function getSubscription(id) {
+export async function getSubscription(id) {
   return getSubscriptionDb(id);
 }
 
 /**
  * Get all subscriptions for a merchant.
  */
-export function getMerchantSubscriptions(merchantAddress) {
+export async function getMerchantSubscriptions(merchantAddress) {
   return dbGetMerchantSubscriptions(merchantAddress);
 }
 
 /**
  * Get active subscriptions for a payer.
  */
-export function getPayerSubscriptions(payerAddress) {
+export async function getPayerSubscriptions(payerAddress) {
   return dbGetPayerSubscriptions(payerAddress);
 }
 
 /**
  * Cancel a subscription. Caller must be the payer or the merchant.
  */
-export function cancelSubscription(id, callerAddress) {
-  const sub = getSubscriptionDb(id);
+export async function cancelSubscription(id, callerAddress) {
+  const sub = await getSubscriptionDb(id);
   if (!sub) throw new Error(`Subscription ${id} not found`);
 
   const caller = callerAddress.toLowerCase();
@@ -82,7 +82,7 @@ export function cancelSubscription(id, callerAddress) {
     throw new Error("Not authorized to cancel this subscription");
   }
 
-  cancelSubscriptionDb(id);
+  await cancelSubscriptionDb(id);
 }
 
 /**
@@ -90,7 +90,7 @@ export function cancelSubscription(id, callerAddress) {
  * Advances next_charge_at before executing to prevent double-charging.
  */
 export async function chargeSubscription(subscriptionId) {
-  const sub = getSubscriptionDb(subscriptionId);
+  const sub = await getSubscriptionDb(subscriptionId);
   if (!sub) throw new Error(`Subscription ${subscriptionId} not found`);
   if (sub.status !== "ACTIVE") throw new Error("Subscription is not active");
   if (!sub.encrypted_session_key || !sub.session_expiry) {
@@ -98,7 +98,7 @@ export async function chargeSubscription(subscriptionId) {
   }
 
   // Save the subscription's session key for the payer (used by orchestrator)
-  saveSessionKey({
+  await saveSessionKey({
     wallet_address: sub.payer_address,
     encrypted_private_key: sub.encrypted_session_key,
     session_address: sub.session_address,
@@ -109,10 +109,10 @@ export async function chargeSubscription(subscriptionId) {
 
   // Advance next_charge_at immediately to prevent double-charge on retry
   const nextChargeAt = Date.now() + sub.interval_days * 24 * 60 * 60 * 1000;
-  updateSubscriptionNextCharge(subscriptionId, nextChargeAt);
+  await updateSubscriptionNextCharge(subscriptionId, nextChargeAt);
 
   // Create payment job — skipConfirmation bypasses AWAITING_CONFIRMATION
-  const jobId = createPaymentJobAutoExecute({
+  const jobId = await createPaymentJobAutoExecute({
     payerAddress: sub.payer_address,
     merchantAddress: sub.merchant_address,
     targetAmount: sub.amount_usdc,
@@ -127,7 +127,7 @@ export async function chargeSubscription(subscriptionId) {
  * Process all due subscriptions. Called by the scheduler.
  */
 export async function tickSubscriptions() {
-  const due = getDueSubscriptions();
+  const due = await getDueSubscriptions();
   if (due.length === 0) return;
 
   console.log(`[subscriptions] Charging ${due.length} due subscription(s)`);

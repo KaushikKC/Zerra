@@ -18,18 +18,18 @@ const SLUG_RE = /^[a-z0-9-]{3,40}$/;
  * @param {string} slug - e.g. "alice-studio"
  * @returns {object} Updated merchant row
  */
-export function setupSlug(walletAddress, slug) {
+export async function setupSlug(walletAddress, slug) {
   if (!SLUG_RE.test(slug)) {
     throw new Error("Slug must be 3-40 lowercase letters, digits, or hyphens");
   }
 
   // Check uniqueness (getMerchantBySlug returns null if available)
-  const existing = getMerchantBySlug(slug);
+  const existing = await getMerchantBySlug(slug);
   if (existing && existing.wallet_address !== walletAddress) {
     throw new Error("Slug already taken");
   }
 
-  setMerchantSlug(walletAddress, slug);
+  await setMerchantSlug(walletAddress, slug);
   return getMerchant(walletAddress);
 }
 
@@ -37,13 +37,13 @@ export function setupSlug(walletAddress, slug) {
  * Add or update a product in a merchant's store.
  * Pass `id` to update an existing product, omit to add a new one.
  */
-export function upsertProduct(merchantAddress, product) {
+export async function upsertProduct(merchantAddress, product) {
   if (!merchantAddress) throw new Error("merchantAddress is required");
   if (!product.name || !product.price) throw new Error("name and price are required");
 
   if (product.id) {
     // Update
-    dbUpdateProduct(product.id, merchantAddress, {
+    await dbUpdateProduct(product.id, merchantAddress, {
       name: product.name,
       description: product.description,
       price: product.price,
@@ -56,7 +56,7 @@ export function upsertProduct(merchantAddress, product) {
   } else {
     // Insert
     const id = randomUUID();
-    dbAddProduct({
+    await dbAddProduct({
       id,
       merchant_address: merchantAddress,
       name: product.name,
@@ -74,19 +74,19 @@ export function upsertProduct(merchantAddress, product) {
 /**
  * Deactivate (soft-delete) a product.
  */
-export function removeProduct(id, merchantAddress) {
-  dbDeleteProduct(id, merchantAddress);
+export async function removeProduct(id, merchantAddress) {
+  await dbDeleteProduct(id, merchantAddress);
 }
 
 /**
  * Get public storefront data for a slug.
  * @returns {{ merchant, products[] } | null}
  */
-export function getStorefront(slug) {
-  const merchant = getMerchantBySlug(slug);
+export async function getStorefront(slug) {
+  const merchant = await getMerchantBySlug(slug);
   if (!merchant) return null;
 
-  const products = getProducts(merchant.wallet_address);
+  const products = await getProducts(merchant.wallet_address);
 
   // Return only safe public fields
   return {

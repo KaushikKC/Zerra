@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { encodeFunctionData, parseUnits, keccak256, toHex, createPublicClient, createWalletClient, http } from "viem";
+import { parseUnits, keccak256, toHex, createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import {
   createJob,
@@ -13,19 +13,7 @@ import { getQuote } from "../router/quoteEngine.js";
 import { getSwapProvider } from "../swap/swapProvider.js";
 import { buildSmartAccountClient, sendBatchUserOp } from "../aa/smartAccount.js";
 import { decryptKey } from "../aa/sessionKeys.js";
-import {
-  buildTransferToEoaTx,
-  callEoaApproveAndDeposit,
-  initiateTransfer,
-  buildMintTx,
-} from "../bridge/gatewayBridge.js";
-import {
-  createCircleGatewayWallet,
-  circleApproveAndDeposit,
-} from "../circle/circleDeposit.js";
-import {
-  updateSessionKeyCircleWallet,
-} from "../db/database.js";
+import { bridgeUsdcToArc } from "../bridge/bridgeKitBridge.js";
 import { config } from "../config/networks.js";
 import { getSplitConfig } from "../merchant/merchant.js";
 import { dispatchWebhook } from "../webhooks/webhookDispatcher.js";
@@ -75,10 +63,8 @@ const PAYMENT_ROUTER_ABI = [
  * States (in order):
  *  SCANNING → ROUTING → AWAITING_CONFIRMATION (skipped if autoExecute)
  *  → SWAPPING (only if swap steps exist)
- *  → GATEWAY_DEPOSITING
- *  → GATEWAY_TRANSFERRING
- *  → MINTING
- *  → PAYING
+ *  → BRIDGING  (Circle Bridge Kit CCTPv2: approve + burn + mint in one call)
+ *  → PAYING    (session key EOA calls approve + pay on Arc directly)
  *  → COMPLETE | FAILED | EXPIRED
  *
  * CRITICAL: Every state transition saves to DB BEFORE executing the on-chain step.
@@ -105,9 +91,9 @@ const PAYMENT_ROUTER_ABI = [
  *
  * @param {object} params
  */
-export function createPaymentJob({ payerAddress, merchantAddress, targetAmount, label, paymentRef, expiresAt }) {
+export async function createPaymentJob({ payerAddress, merchantAddress, targetAmount, label, paymentRef, expiresAt }) {
   const jobId = randomUUID();
-  createJob({
+  await createJob({
     id: jobId,
     payer_address: payerAddress,
     merchant_address: merchantAddress,
@@ -118,9 +104,9 @@ export function createPaymentJob({ payerAddress, merchantAddress, targetAmount, 
     expires_at: expiresAt ?? null,
   });
   // skipConfirmation: true — user already confirmed on the frontend
-  runOrchestrator(jobId, { skipConfirmation: true }).catch((err) => {
+  runOrchestrator(jobId, { skipConfirmation: true }).catch(async (err) => {
     console.error(`[orchestrator] Job ${jobId} crashed:`, err.message);
-    updateJobStatus(jobId, "FAILED", { error: err.message });
+    await updateJobStatus(jobId, "FAILED", { error: err.message });
   });
   return jobId;
 }
@@ -129,9 +115,9 @@ export function createPaymentJob({ payerAddress, merchantAddress, targetAmount, 
  * Create a payment job that skips the AWAITING_CONFIRMATION step.
  * Used by subscription auto-charges.
  */
-export function createPaymentJobAutoExecute({ payerAddress, merchantAddress, targetAmount, label, paymentRef, expiresAt }) {
+export async function createPaymentJobAutoExecute({ payerAddress, merchantAddress, targetAmount, label, paymentRef, expiresAt }) {
   const jobId = randomUUID();
-  createJob({
+  await createJob({
     id: jobId,
     payer_address: payerAddress,
     merchant_address: merchantAddress,
@@ -141,9 +127,9 @@ export function createPaymentJobAutoExecute({ payerAddress, merchantAddress, tar
     status: "SCANNING",
     expires_at: expiresAt ?? null,
   });
-  runOrchestrator(jobId, { skipConfirmation: true }).catch((err) => {
+  runOrchestrator(jobId, { skipConfirmation: true }).catch(async (err) => {
     console.error(`[orchestrator] Auto-job ${jobId} crashed:`, err.message);
-    updateJobStatus(jobId, "FAILED", { error: err.message });
+    await updateJobStatus(jobId, "FAILED", { error: err.message });
   });
   return jobId;
 }
@@ -151,7 +137,7 @@ export function createPaymentJobAutoExecute({ payerAddress, merchantAddress, tar
 // ── Main state machine ────────────────────────────────────────────────────────
 
 async function runOrchestrator(jobId, opts = {}) {
-  const job = getJob(jobId);
+  const job = await getJob(jobId);
   if (!job) throw new Error(`Job not found: ${jobId}`);
 
   switch (job.status) {
@@ -166,14 +152,8 @@ async function runOrchestrator(jobId, opts = {}) {
     case "SWAPPING":
       await stepSwap(jobId);
       break;
-    case "GATEWAY_DEPOSITING":
-      await stepDeposit(jobId);
-      break;
-    case "GATEWAY_TRANSFERRING":
-      await stepTransfer(jobId);
-      break;
-    case "MINTING":
-      await stepMint(jobId);
+    case "BRIDGING":
+      await stepBridge(jobId);
       break;
     case "PAYING":
       await stepPay(jobId);
@@ -190,12 +170,12 @@ async function runOrchestrator(jobId, opts = {}) {
 // ── State: SCANNING ───────────────────────────────────────────────────────────
 
 async function stepScan(jobId, opts) {
-  const job = getJob(jobId);
+  const job = await getJob(jobId);
   console.log(`[orchestrator:${jobId}] SCANNING balances for ${job.payer_address}`);
 
   // If a Circle wallet was pre-created during session/create, the user funded it
   // directly — scan that address instead of the smart account (which has no USDC).
-  const sessionKeyRow = getSessionKey(job.payer_address);
+  const sessionKeyRow = await getSessionKey(job.payer_address);
   const scanAddress = sessionKeyRow?.circle_wallet_address ?? job.payer_address;
   if (scanAddress !== job.payer_address) {
     console.log(`[orchestrator:${jobId}] Pre-funded Circle wallet detected — scanning ${scanAddress}`);
@@ -221,21 +201,21 @@ async function stepScan(jobId, opts) {
     }
   }
 
-  updateJobStatus(jobId, "ROUTING", { source_plan: { _rawBalances: balances } });
+  await updateJobStatus(jobId, "ROUTING", { source_plan: { _rawBalances: balances } });
   await stepRoute(jobId, opts);
 }
 
 // ── State: ROUTING ────────────────────────────────────────────────────────────
 
 async function stepRoute(jobId, opts = {}) {
-  const job = getJob(jobId);
+  const job = await getJob(jobId);
   console.log(`[orchestrator:${jobId}] ROUTING`);
 
   const rawBalances = job.source_plan?._rawBalances;
   const quote = await getQuote(job.payer_address, job.target_amount, rawBalances ?? undefined);
 
   if (!quote.sufficientFunds) {
-    updateJobStatus(jobId, "FAILED", {
+    await updateJobStatus(jobId, "FAILED", {
       error: `Insufficient funds. Need ${job.target_amount} USDC + fees. Shortfall: ${quote.shortfallUsdc} USDC`,
     });
     return;
@@ -253,7 +233,7 @@ async function stepRoute(jobId, opts = {}) {
   // Payer already has USDC on Arc — skip the entire bridge chain and go straight
   // to PAYING where the session key EOA executes approve + pay as plain EOA txs.
   if (quote.isDirect) {
-    updateJobStatus(jobId, "PAYING", { source_plan: quote.sourcePlan, quote: quoteData });
+    await updateJobStatus(jobId, "PAYING", { source_plan: quote.sourcePlan, quote: quoteData });
     console.log(`[orchestrator:${jobId}] Arc-direct path — skipping bridge, going straight to PAYING`);
     await stepPay(jobId);
     return;
@@ -262,12 +242,12 @@ async function stepRoute(jobId, opts = {}) {
   if (opts.skipConfirmation) {
     // For subscription auto-charges, skip AWAITING_CONFIRMATION
     const hasSwap = quote.sourcePlan.some((s) => s.type === "swap");
-    const nextState = hasSwap ? "SWAPPING" : "GATEWAY_DEPOSITING";
-    updateJobStatus(jobId, nextState, { source_plan: quote.sourcePlan, quote: quoteData });
+    const nextState = hasSwap ? "SWAPPING" : "BRIDGING";
+    await updateJobStatus(jobId, nextState, { source_plan: quote.sourcePlan, quote: quoteData });
     console.log(`[orchestrator:${jobId}] Auto-executing (skipConfirmation), next: ${nextState}`);
     await runOrchestrator(jobId, opts);
   } else {
-    updateJobStatus(jobId, "AWAITING_CONFIRMATION", {
+    await updateJobStatus(jobId, "AWAITING_CONFIRMATION", {
       source_plan: quote.sourcePlan,
       quote: quoteData,
     });
@@ -281,14 +261,14 @@ async function stepRoute(jobId, opts = {}) {
  * Advance a job from AWAITING_CONFIRMATION → begin execution.
  */
 export async function confirmAndExecute(jobId) {
-  const job = getJob(jobId);
+  const job = await getJob(jobId);
   if (!job || job.status !== "AWAITING_CONFIRMATION") {
     throw new Error(`Job ${jobId} is not in AWAITING_CONFIRMATION state`);
   }
 
   const hasSwap = job.source_plan?.some((s) => s.type === "swap");
-  const nextState = hasSwap ? "SWAPPING" : "GATEWAY_DEPOSITING";
-  updateJobStatus(jobId, nextState);
+  const nextState = hasSwap ? "SWAPPING" : "BRIDGING";
+  await updateJobStatus(jobId, nextState);
 
   await runOrchestrator(jobId, {});
 }
@@ -296,7 +276,7 @@ export async function confirmAndExecute(jobId) {
 // ── State: SWAPPING ───────────────────────────────────────────────────────────
 
 async function stepSwap(jobId) {
-  const job = getJob(jobId);
+  const job = await getJob(jobId);
   const swapSteps = job.source_plan.filter((s) => s.type === "swap");
   console.log(`[orchestrator:${jobId}] SWAPPING (${swapSteps.length} steps)`);
 
@@ -305,7 +285,7 @@ async function stepSwap(jobId) {
 
   for (const step of swapSteps) {
     const chain = config.sourceChains.find((c) => c.key === step.chain);
-    const sessionKeyRow = getSessionKey(job.payer_address);
+    const sessionKeyRow = await getSessionKey(job.payer_address);
     if (!sessionKeyRow) throw new Error("Session key not found for payer");
 
     const client = await buildSmartAccountClient(
@@ -327,169 +307,44 @@ async function stepSwap(jobId) {
     console.log(`[orchestrator:${jobId}] Swap on ${step.chain}: ${txHash}`);
   }
 
-  updateJobTxHash(jobId, { swap: swapTxHashes });
-  updateJobStatus(jobId, "GATEWAY_DEPOSITING");
-  await stepDeposit(jobId);
+  await updateJobTxHash(jobId, { swap: swapTxHashes });
+  await updateJobStatus(jobId, "BRIDGING");
+  await stepBridge(jobId);
 }
 
-// ── State: GATEWAY_DEPOSITING ─────────────────────────────────────────────────
+// ── State: BRIDGING ───────────────────────────────────────────────────────────
 
-async function stepDeposit(jobId) {
-  const job = getJob(jobId);
-  console.log(`[orchestrator:${jobId}] GATEWAY_DEPOSITING`);
+/**
+ * Bridge USDC from source chain(s) to Arc Testnet using Circle Bridge Kit (CCTPv2).
+ *
+ * The session key EOA (private key stored encrypted in DB) is both the sender on the
+ * source chain and the recipient on Arc. After this step, the session key EOA holds
+ * USDC on Arc and can pay the merchant directly (stepDirectArcPay).
+ */
+async function stepBridge(jobId) {
+  const job = await getJob(jobId);
+  console.log(`[orchestrator:${jobId}] BRIDGING via Circle Bridge Kit (CCTPv2)`);
 
-  const depositTxHashes = {};
-  const chainGroups = {};
-  for (const step of job.source_plan) {
-    if (!chainGroups[step.chain]) chainGroups[step.chain] = [];
-    chainGroups[step.chain].push(step);
-  }
-
-  for (const [chainKey, steps] of Object.entries(chainGroups)) {
-    const chain = config.sourceChains.find((c) => c.key === chainKey);
-    let sessionKeyRow = getSessionKey(job.payer_address);
-    if (!sessionKeyRow) throw new Error("Session key not found for payer");
-
-    const client = await buildSmartAccountClient(
-      job.payer_address,
-      chain,
-      sessionKeyRow.encrypted_private_key
-    );
-
-    const totalUsdc = steps.reduce((sum, s) => {
-      const amt = s.type === "swap" ? parseFloat(s.toUsdc ?? "0") : parseFloat(s.amount);
-      return sum + amt;
-    }, 0);
-
-    console.log(`[orchestrator:${jobId}] Smart account: ${client.account.address}`);
-
-    // ── Get or create a Circle-managed EOA wallet for this session ──────────
-    // The Circle wallet is the Gateway depositor + BurnIntent signer.
-    // Preferred path: Circle wallet was pre-created in POST /api/session/create
-    // and the user funded it directly — Circle's indexer already has the balance.
-    // Fallback: create it lazily here and transfer via ERC-4337 (legacy).
-
-    let circleWalletId = sessionKeyRow.circle_wallet_id;
-    let circleWalletAddress = sessionKeyRow.circle_wallet_address;
-
-    // Track whether the wallet was pre-funded by the user (direct transfer, indexed by Circle)
-    const wasPreFunded = !!circleWalletId;
-
-    if (!circleWalletId) {
-      console.log(`[orchestrator:${jobId}] Creating Circle gateway wallet for payer ${job.payer_address}...`);
-      const created = await createCircleGatewayWallet();
-      circleWalletId = created.walletId;
-      circleWalletAddress = created.walletAddress;
-      updateSessionKeyCircleWallet(job.payer_address, circleWalletId, circleWalletAddress);
-      console.log(`[orchestrator:${jobId}] Circle wallet: ${circleWalletAddress} (id: ${circleWalletId})`);
-      // Re-fetch the row so stepTransfer can read the updated addresses
-      sessionKeyRow = getSessionKey(job.payer_address);
-    } else {
-      console.log(`[orchestrator:${jobId}] Using pre-funded Circle wallet: ${circleWalletAddress} (id: ${circleWalletId})`);
-    }
-
-    if (wasPreFunded) {
-      // User funded the Circle wallet directly via fundTxes — Circle's indexer
-      // already has the correct balance. No ERC-4337 transfer needed.
-      console.log(`[orchestrator:${jobId}] Circle wallet pre-funded by user — skipping ERC-4337 transfer`);
-    } else {
-      // Legacy fallback: USDC is in the smart account. Transfer it to Circle wallet
-      // via ERC-4337 UserOp (Pimlico-sponsored). Circle may lag on indexing this.
-      const transferTx = buildTransferToEoaTx(chainKey, totalUsdc.toFixed(6), circleWalletAddress);
-      const { txHash } = await sendBatchUserOp(client, [transferTx]);
-      depositTxHashes[chainKey] = txHash;
-      console.log(`[orchestrator:${jobId}] USDC transferred to Circle wallet on ${chainKey}: ${txHash}`);
-    }
-
-    // Circle wallet calls approve+deposit via Circle SDK.
-    const depositHash = await circleApproveAndDeposit(circleWalletId, circleWalletAddress, chainKey, totalUsdc.toFixed(6));
-    depositTxHashes[`${chainKey}_deposit`] = depositHash;
-    console.log(`[orchestrator:${jobId}] Circle wallet deposited on ${chainKey}: ${depositHash}`);
-  }
-
-  updateJobTxHash(jobId, { deposit: depositTxHashes });
-  updateJobStatus(jobId, "GATEWAY_TRANSFERRING");
-  await stepTransfer(jobId);
-}
-
-// ── State: GATEWAY_TRANSFERRING ───────────────────────────────────────────────
-
-async function stepTransfer(jobId) {
-  const job = getJob(jobId);
-  console.log(`[orchestrator:${jobId}] GATEWAY_TRANSFERRING`);
-
-  const sessionKeyRow = getSessionKey(job.payer_address);
+  const sessionKeyRow = await getSessionKey(job.payer_address);
   if (!sessionKeyRow) throw new Error("Session key not found for payer");
 
-  const chainGroups = {};
+  const privateKey = decryptKey(sessionKeyRow.encrypted_private_key);
+
   for (const step of job.source_plan) {
-    if (!chainGroups[step.chain]) chainGroups[step.chain] = 0;
-    const amt = step.type === "swap" ? parseFloat(step.toUsdc ?? "0") : parseFloat(step.amount);
-    chainGroups[step.chain] += amt;
+    if (step.isDirect) continue; // Arc-direct steps need no bridging
+
+    const amount = step.type === "swap"
+      ? (step.toUsdc ?? "0")
+      : step.amount;
+
+    console.log(`[orchestrator:${jobId}] Bridging ${amount} USDC from ${step.chain} → Arc...`);
+    const destAddress = await bridgeUsdcToArc(privateKey, step.chain, amount);
+    console.log(`[orchestrator:${jobId}] Bridge done — USDC arrived at ${destAddress} on Arc`);
   }
 
-  const sources = Object.entries(chainGroups).map(([chain, amount]) => ({
-    chain,
-    amount: amount.toFixed(6),
-  }));
-
-  // Circle wallet deposited and will sign the BurnIntent (preferred path)
-  // Falls back to raw EOA signing if no Circle wallet was created
-  const circleWalletId = sessionKeyRow.circle_wallet_id ?? null;
-  const depositorAddress = sessionKeyRow.circle_wallet_address ?? sessionKeyRow.session_address;
-  const signerPrivateKey = circleWalletId ? null : decryptKey(sessionKeyRow.encrypted_private_key);
-
-  const recipientAddress = job.payer_address; // smart account on Arc (receives minted USDC)
-
-  console.log(`[orchestrator:${jobId}] Depositor: ${depositorAddress} (${circleWalletId ? "Circle wallet" : "session key EOA"})`);
-  console.log(`[orchestrator:${jobId}] Recipient on Arc (smart account): ${recipientAddress}`);
-
-  // Destination recipient is the smart account (USDC lands here, stepPay pays merchant)
-  const { attestation, attestationSignature } = await initiateTransfer(
-    sources,
-    config.destinationChain.key,
-    recipientAddress,    // minted USDC goes to smart account on Arc
-    depositorAddress,    // Circle wallet (or EOA) holds the gateway balance
-    signerPrivateKey,    // null if using Circle SDK
-    circleWalletId       // Circle wallet ID for SDK signing (preferred)
-  );
-
-  updateJobStatus(jobId, "MINTING", {
-    quote: {
-      ...job.quote,
-      _attestation: attestation,
-      _attestationSignature: attestationSignature,
-    },
-  });
-  await stepMint(jobId);
-}
-
-// ── State: MINTING ────────────────────────────────────────────────────────────
-
-async function stepMint(jobId) {
-  const job = getJob(jobId);
-  console.log(`[orchestrator:${jobId}] MINTING on Arc`);
-
-  const { _attestation, _attestationSignature } = job.quote;
-  if (!_attestation || !_attestationSignature) {
-    throw new Error("Missing attestation or attestationSignature for mint step");
-  }
-
-  const sessionKeyRow = getSessionKey(job.payer_address);
-  if (!sessionKeyRow) throw new Error("Session key not found for payer");
-
-  const arcClient = await buildSmartAccountClient(
-    job.payer_address,
-    config.destinationChain,
-    sessionKeyRow.encrypted_private_key
-  );
-
-  const mintTx = buildMintTx(_attestation, _attestationSignature);
-  const { txHash } = await sendBatchUserOp(arcClient, [mintTx]);
-
-  updateJobTxHash(jobId, { mint: txHash });
-  updateJobStatus(jobId, "PAYING");
-  await stepPay(jobId);
+  // Mark as PAYING with _bridgeKit flag so stepPay uses the EOA direct path
+  await updateJobStatus(jobId, "PAYING", { quote: { ...job.quote, _bridgeKit: true } });
+  await stepDirectArcPay(jobId);
 }
 
 // ── State: PAYING ─────────────────────────────────────────────────────────────
@@ -502,13 +357,13 @@ async function stepMint(jobId) {
  * USDC is Arc's native gas token, so the EOA pays gas from the same balance.
  */
 async function stepDirectArcPay(jobId) {
-  const job = getJob(jobId);
+  const job = await getJob(jobId);
   console.log(`[orchestrator:${jobId}] PAYING (Arc-direct EOA)`);
 
   const routerAddress = process.env.PAYMENT_ROUTER_ADDRESS;
   if (!routerAddress) throw new Error("PAYMENT_ROUTER_ADDRESS not set");
 
-  const sessionKeyRow = getSessionKey(job.payer_address);
+  const sessionKeyRow = await getSessionKey(job.payer_address);
   if (!sessionKeyRow) throw new Error("Session key not found for payer");
 
   const privateKey = decryptKey(sessionKeyRow.encrypted_private_key);
@@ -544,7 +399,7 @@ async function stepDirectArcPay(jobId) {
   console.log(`[orchestrator:${jobId}] Arc-direct approve confirmed: ${approveHash}`);
 
   // Step 2: pay (or splitPay)
-  const splitConfig = getSplitConfig(job.merchant_address);
+  const splitConfig = await getSplitConfig(job.merchant_address);
   let payHash;
   if (splitConfig && splitConfig.length > 0) {
     payHash = await walletClient.writeContract({
@@ -563,12 +418,12 @@ async function stepDirectArcPay(jobId) {
   }
   await publicClient.waitForTransactionReceipt({ hash: payHash });
 
-  updateJobTxHash(jobId, { pay: payHash });
-  updateJobStatus(jobId, "COMPLETE");
+  await updateJobTxHash(jobId, { pay: payHash });
+  await updateJobStatus(jobId, "COMPLETE");
   console.log(`[orchestrator:${jobId}] COMPLETE (Arc-direct) — tx: ${payHash}`);
 
   // Dispatch webhook async (never fails the job)
-  const completedJob = getJob(jobId);
+  const completedJob = await getJob(jobId);
   dispatchWebhook(completedJob).catch((err) => {
     console.error(`[orchestrator:${jobId}] Webhook dispatch error:`, err.message);
   });
@@ -577,10 +432,12 @@ async function stepDirectArcPay(jobId) {
 // ── State: PAYING (cross-chain — smart account via ERC-4337) ─────────────────
 
 async function stepPay(jobId) {
-  const job = getJob(jobId);
+  const job = await getJob(jobId);
 
-  // Arc-direct path: payer was already on Arc, session key EOA executes directly
-  if (job.quote?.isDirect || job.source_plan?.some((s) => s.isDirect)) {
+  // Arc-direct: payer was already on Arc
+  // Bridge Kit: USDC was just bridged to session key EOA on Arc
+  // Both paths: session key EOA pays merchant directly (no ERC-4337)
+  if (job.quote?.isDirect || job.quote?._bridgeKit || job.source_plan?.some((s) => s.isDirect)) {
     await stepDirectArcPay(jobId);
     return;
   }
@@ -590,7 +447,7 @@ async function stepPay(jobId) {
   const routerAddress = process.env.PAYMENT_ROUTER_ADDRESS;
   if (!routerAddress) throw new Error("PAYMENT_ROUTER_ADDRESS not set");
 
-  const sessionKeyRow = getSessionKey(job.payer_address);
+  const sessionKeyRow = await getSessionKey(job.payer_address);
   if (!sessionKeyRow) throw new Error("Session key not found for payer");
 
   const arcClient = await buildSmartAccountClient(
@@ -619,7 +476,7 @@ async function stepPay(jobId) {
   };
 
   // Check for split config
-  const splitConfig = getSplitConfig(job.merchant_address);
+  const splitConfig = await getSplitConfig(job.merchant_address);
 
   let payTx;
   if (splitConfig && splitConfig.length > 0) {
@@ -649,12 +506,12 @@ async function stepPay(jobId) {
 
   const { txHash } = await sendBatchUserOp(arcClient, [approveTx, payTx]);
 
-  updateJobTxHash(jobId, { pay: txHash });
-  updateJobStatus(jobId, "COMPLETE");
+  await updateJobTxHash(jobId, { pay: txHash });
+  await updateJobStatus(jobId, "COMPLETE");
   console.log(`[orchestrator:${jobId}] COMPLETE — tx: ${txHash}`);
 
   // Dispatch webhook async (never fails the job)
-  const completedJob = getJob(jobId);
+  const completedJob = await getJob(jobId);
   dispatchWebhook(completedJob).catch((err) => {
     console.error(`[orchestrator:${jobId}] Webhook dispatch error:`, err.message);
   });
@@ -666,7 +523,7 @@ async function stepPay(jobId) {
  * Retry a failed job from the last successful state.
  */
 export async function retryJob(jobId) {
-  const job = getJob(jobId);
+  const job = await getJob(jobId);
   if (!job) throw new Error(`Job not found: ${jobId}`);
   if (job.status !== "FAILED") throw new Error(`Job ${jobId} is not in FAILED state`);
 
@@ -675,16 +532,12 @@ export async function retryJob(jobId) {
 
   if (hashes.pay) {
     resumeState = "PAYING";
-  } else if (hashes.mint) {
-    resumeState = "PAYING";
-  } else if (hashes.deposit) {
-    resumeState = "GATEWAY_TRANSFERRING";
   } else if (hashes.swap) {
-    resumeState = "GATEWAY_DEPOSITING";
+    resumeState = "BRIDGING";
   } else {
     resumeState = "SCANNING";
   }
 
-  updateJobStatus(jobId, resumeState, { error: null });
+  await updateJobStatus(jobId, resumeState, { error: null });
   await runOrchestrator(jobId, {});
 }

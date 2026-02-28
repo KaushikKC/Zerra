@@ -32,12 +32,12 @@ export async function seedDemoData() {
   const forceReseed = process.env.SEED_FORCE === "1" || process.env.SEED_FORCE === "true";
 
   // ── Skip if already seeded (unless SEED_FORCE) ─────────────────────────────────
-  const existing = getStorefront(slug);
+  const existing = await getStorefront(slug);
   if (existing) {
     if (forceReseed) {
       const addr = existing.merchant.walletAddress;
-      for (const p of existing.products) removeProduct(p.id, addr);
-      setMerchantSlug(addr, null);
+      for (const p of existing.products) await removeProduct(p.id, addr);
+      await setMerchantSlug(addr, null);
       console.log(`[seed] Reset demo storefront '${slug}' (cleared slug + ${existing.products.length} products)`);
     } else {
       console.log(`[seed] Demo storefront '${slug}' already exists — skipping (set SEED_FORCE=1 to reset)`);
@@ -46,9 +46,9 @@ export async function seedDemoData() {
   }
 
   // ── Register merchant ──────────────────────────────────────────────────────
-  const existingMerchant = getMerchant(merchantAddress);
+  const existingMerchant = await getMerchant(merchantAddress);
   if (!existingMerchant) {
-    registerMerchant(
+    await registerMerchant(
       merchantAddress,
       "Arc Dev Tools",
       null  // no logo URL — initials avatar is shown
@@ -58,7 +58,7 @@ export async function seedDemoData() {
 
   // ── Claim slug ─────────────────────────────────────────────────────────────
   try {
-    setupSlug(merchantAddress, slug);
+    await setupSlug(merchantAddress, slug);
     console.log(`[seed] Claimed slug: ${slug}`);
   } catch (err) {
     // Slug already claimed by another merchant
@@ -68,7 +68,7 @@ export async function seedDemoData() {
 
   // ── Create products ────────────────────────────────────────────────────────
 
-  upsertProduct(merchantAddress, {
+  await upsertProduct(merchantAddress, {
     name: "API Credits Pack",
     description:
       "100,000 Arc RPC API calls with guaranteed uptime. Instant activation. " +
@@ -78,7 +78,7 @@ export async function seedDemoData() {
     sortOrder: 0,
   });
 
-  upsertProduct(merchantAddress, {
+  await upsertProduct(merchantAddress, {
     name: "NFT Mint Pass",
     description:
       "Exclusive access to mint 1 NFT from the Arc Genesis Collection. " +
@@ -88,7 +88,7 @@ export async function seedDemoData() {
     sortOrder: 1,
   });
 
-  upsertProduct(merchantAddress, {
+  await upsertProduct(merchantAddress, {
     name: "Pro Developer Bundle",
     description:
       "Full Arc SDK access, dedicated RPC endpoint, on-chain analytics dashboard, " +
@@ -98,7 +98,7 @@ export async function seedDemoData() {
     sortOrder: 2,
   });
 
-  upsertProduct(merchantAddress, {
+  await upsertProduct(merchantAddress, {
     name: "Developer Pro Monthly",
     description:
       "Unlimited API access, 1M RPC calls/month, advanced on-chain analytics, " +
