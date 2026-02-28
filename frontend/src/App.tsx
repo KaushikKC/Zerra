@@ -7,6 +7,7 @@ import Success from "./pages/Success";
 import PaymentFailed from "./pages/PaymentFailed";
 import MerchantDashboard from "./pages/MerchantDashboard";
 import Storefront from "./pages/Storefront";
+import Stores from "./pages/Stores";
 import Receipt from "./pages/Receipt";
 import SubscriptionAuth from "./pages/SubscriptionAuth";
 import PitchDeck from "./pages/PitchDeck";
@@ -62,6 +63,14 @@ export default function App() {
           element={
             <AppLayout>
               <MerchantDashboard />
+            </AppLayout>
+          }
+        />
+        <Route
+          path="/stores"
+          element={
+            <AppLayout>
+              <Stores />
             </AppLayout>
           }
         />

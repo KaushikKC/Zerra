@@ -15,11 +15,12 @@ export default function Landing() {
         <div className="hidden md:flex items-center gap-12 text-sm font-bold uppercase tracking-widest text-[#132318]/60">
           <a href="#how-it-works" className="hover:text-[#132318] transition-colors">How it works</a>
           <a href="#features" className="hover:text-[#132318] transition-colors">Features</a>
+          <Link to="/stores" className="hover:text-[#132318] transition-colors">Stores</Link>
           <Link to="/store/arc-dev" className="hover:text-[#132318] transition-colors">Demo Store</Link>
           <Link to="/merchant" className="hover:text-[#132318] transition-colors">Sell</Link>
         </div>
-        <Link to="/pay" className="btn-primary py-3 px-8">
-          Connect <ArrowRight className="w-5 h-5" />
+        <Link to="/stores" className="btn-primary py-3 px-8">
+          Stores <ArrowRight className="w-5 h-5" />
         </Link>
       </nav>
 
@@ -41,8 +42,8 @@ export default function Landing() {
               Recipient gets USDC on Zerra. One Signature. Zero Headaches.
             </p>
             <div className="flex flex-wrap gap-6">
-              <Link to="/pay" className="btn-primary text-xl px-12 py-6 shadow-2xl shadow-[#132318]/20">
-                Pay Now <ArrowRight className="w-6 h-6" />
+              <Link to="/stores" className="btn-primary text-xl px-12 py-6 shadow-2xl shadow-[#132318]/20">
+                Browse stores <ArrowRight className="w-6 h-6" />
               </Link>
               <Link to="/store/arc-dev" className="btn-secondary text-xl px-12 py-6">
                 View Demo Store
@@ -155,8 +156,8 @@ export default function Landing() {
                   </div>
                 ))}
               </div>
-              <Link to="/pay" className="btn-primary mt-16 !bg-[#E1FF76] !text-[#132318] hover:!bg-white text-xl px-12 py-6">
-                Experience it now <ArrowRight className="w-6 h-6" />
+              <Link to="/stores" className="btn-primary mt-16 !bg-[#E1FF76] !text-[#132318] hover:!bg-white text-xl px-12 py-6">
+                Browse stores <ArrowRight className="w-6 h-6" />
               </Link>
             </div>
           </div>

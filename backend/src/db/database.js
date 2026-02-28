@@ -36,6 +36,7 @@ if (usePg) {
     getMerchant: wrapSync(sqlite.getMerchant),
     setMerchantSlug: wrapSync(sqlite.setMerchantSlug),
     getMerchantBySlug: wrapSync(sqlite.getMerchantBySlug),
+    getStorefrontsList: wrapSync(sqlite.getStorefrontsList),
     setMerchantWebhookUrl: wrapSync(sqlite.setMerchantWebhookUrl),
     setMerchantSplitConfig: wrapSync(sqlite.setMerchantSplitConfig),
     cacheGatewayContract: wrapSync(sqlite.cacheGatewayContract),
@@ -79,6 +80,7 @@ export const registerMerchant = api.registerMerchant;
 export const getMerchant = api.getMerchant;
 export const setMerchantSlug = api.setMerchantSlug;
 export const getMerchantBySlug = api.getMerchantBySlug;
+export const getStorefrontsList = api.getStorefrontsList;
 export const setMerchantWebhookUrl = api.setMerchantWebhookUrl;
 export const setMerchantSplitConfig = api.setMerchantSplitConfig;
 export const cacheGatewayContract = api.cacheGatewayContract;

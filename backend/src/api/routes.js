@@ -25,6 +25,7 @@ import {
   getSplitConfig,
 } from "../merchant/merchant.js";
 import { setupSlug, upsertProduct, removeProduct, getStorefront } from "../storefront/storefront.js";
+import { getStorefrontsList } from "../db/database.js";
 import {
   createSubscription,
   getSubscription,
@@ -379,6 +380,24 @@ router.post("/storefront/slug", async (req, res) => {
     res.json(merchant);
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// ── GET /api/storefronts ──────────────────────────────────────────────────────
+// List all storefronts (merchants with a slug) for browse/shop
+
+router.get("/storefronts", async (_req, res) => {
+  try {
+    const list = await getStorefrontsList();
+    const storefronts = list.map((row) => ({
+      slug: row.slug,
+      displayName: row.display_name,
+      walletAddress: row.wallet_address,
+      logoUrl: row.logo_url ?? null,
+    }));
+    res.json({ storefronts });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

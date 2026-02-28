@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams, useNavigate } from 'react-router-dom'
+import { useSearchParams, useNavigate, Link } from 'react-router-dom'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useAccount, useSendTransaction, useSwitchChain } from 'wagmi'
 import { waitForTransactionReceipt } from '@wagmi/core'
 import { wagmiConfig } from '../config/wagmiConfig'
 import {
   ShieldCheck, Database, Layers,
-  AlertTriangle, Loader2, CheckCircle2, Info, RefreshCw,
+  AlertTriangle, Loader2, CheckCircle2, Info, RefreshCw, ArrowRight,
 } from 'lucide-react'
 import { useQuote } from '../hooks/useQuote'
 import { API_BASE } from '../config/wagmiConfig'
@@ -186,13 +186,34 @@ export default function Pay() {
   // ── Renders ──────────────────────────────────────────────────────────────────
 
   if (flowState === 'invalid') {
+    const hasParams = searchParams.get('to') || searchParams.get('amount')
     return (
       <div className="mx-auto max-w-2xl px-6 py-40 text-center">
-        <div className="w-20 h-20 bg-red-500/10 rounded-[2rem] flex items-center justify-center mx-auto mb-8">
-          <AlertTriangle className="w-10 h-10 text-red-500" />
-        </div>
-        <h1 className="text-4xl font-black text-[#132318] tracking-tighter mb-4">Invalid Link</h1>
-        <p className="text-[#132318]/50 font-medium">{verifyError ?? 'This payment link is invalid or has expired.'}</p>
+        {hasParams ? (
+          <>
+            <div className="w-20 h-20 bg-red-500/10 rounded-[2rem] flex items-center justify-center mx-auto mb-8">
+              <AlertTriangle className="w-10 h-10 text-red-500" />
+            </div>
+            <h1 className="text-4xl font-black text-[#132318] tracking-tighter mb-4">Invalid Link</h1>
+            <p className="text-[#132318]/50 font-medium mb-8">{verifyError ?? 'This payment link is invalid or has expired.'}</p>
+          </>
+        ) : (
+          <>
+            <div className="w-20 h-20 bg-[#E1FF76]/20 rounded-[2rem] flex items-center justify-center mx-auto mb-8">
+              <ShieldCheck className="w-10 h-10 text-[#132318]" />
+            </div>
+            <h1 className="text-4xl font-black text-[#132318] tracking-tighter mb-4">Pay with Zerra</h1>
+            <p className="text-[#132318]/60 font-medium mb-10 max-w-md mx-auto">
+              This page is for payment links. Browse stores to find something to buy, or use a link shared by a merchant.
+            </p>
+            <Link to="/stores" className="btn-primary inline-flex items-center gap-2 text-lg px-10 py-5">
+              Browse stores <ArrowRight className="w-5 h-5" />
+            </Link>
+            <p className="mt-8 text-sm text-[#132318]/40 font-medium">
+              Or <Link to="/" className="text-[#132318] font-bold underline hover:no-underline">go back home</Link>
+            </p>
+          </>
+        )}
       </div>
     )
   }
@@ -337,7 +358,7 @@ export default function Pay() {
                           <span className="text-white">{quote.breakdown.swapFee} USDC</span>
                         </div>
                         <div className="flex justify-between text-white/50 font-bold">
-                          <span>Circle Gateway bridge fee</span>
+                          <span>Bridge fee (Circle CCTPv2)</span>
                           <span className="text-white">{quote.breakdown.bridgeFee} USDC</span>
                         </div>
                         <div className="flex justify-between text-white/50 font-bold">
@@ -401,7 +422,7 @@ export default function Pay() {
         <p className="text-[10px] font-black uppercase tracking-[0.5em] text-[#132318]/20">
           {(quote as { isDirect?: boolean } | null)?.isDirect
             ? 'Direct on Arc · Powered by Zerra'
-            : 'Powered by Circle Gateway · Arc Network'}
+            : 'Powered by Circle CCTPv2 · Arc Network'}
         </p>
       </div>
     </div>

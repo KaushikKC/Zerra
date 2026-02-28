@@ -209,6 +209,9 @@ const stmts = {
   ),
 
   getMerchantBySlug: db.prepare(`SELECT * FROM merchants WHERE slug = ?`),
+  getMerchantsWithSlug: db.prepare(
+    `SELECT wallet_address, display_name, slug, logo_url FROM merchants WHERE slug IS NOT NULL ORDER BY display_name ASC`
+  ),
 
   setMerchantWebhookUrl: db.prepare(
     `UPDATE merchants SET webhook_url = @webhook_url WHERE wallet_address = @wallet_address`
@@ -470,6 +473,10 @@ export function setMerchantSlug(walletAddress, slug) {
 
 export function getMerchantBySlug(slug) {
   return stmts.getMerchantBySlug.get(slug) ?? null;
+}
+
+export function getStorefrontsList() {
+  return stmts.getMerchantsWithSlug.all();
 }
 
 export function setMerchantWebhookUrl(walletAddress, webhookUrl) {

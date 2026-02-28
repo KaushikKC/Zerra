@@ -323,26 +323,30 @@ async function stepSwap(jobId) {
  */
 async function stepBridge(jobId) {
   const job = await getJob(jobId);
-  console.log(`[orchestrator:${jobId}] BRIDGING via Circle Bridge Kit (CCTPv2)`);
 
   const sessionKeyRow = await getSessionKey(job.payer_address);
   if (!sessionKeyRow) throw new Error("Session key not found for payer");
 
   const privateKey = decryptKey(sessionKeyRow.encrypted_private_key);
 
-  for (const step of job.source_plan) {
-    if (step.isDirect) continue; // Arc-direct steps need no bridging
+  // Collect all steps that require bridging (non-direct, swap or usdc type)
+  const bridgeSteps = (job.source_plan ?? []).filter((s) => !s.isDirect);
 
-    const amount = step.type === "swap"
-      ? (step.toUsdc ?? "0")
-      : step.amount;
+  console.log(
+    `[orchestrator:${jobId}] BRIDGING via Circle Bridge Kit — ${bridgeSteps.length} source chain(s): ` +
+    bridgeSteps.map((s) => s.chain).join(", ")
+  );
 
-    console.log(`[orchestrator:${jobId}] Bridging ${amount} USDC from ${step.chain} → Arc...`);
+  // Bridge sequentially to avoid nonce conflicts on Arc (both mint txs use the same signer)
+  for (let i = 0; i < bridgeSteps.length; i++) {
+    const step = bridgeSteps[i];
+    const amount = step.type === "swap" ? (step.toUsdc ?? "0") : step.amount;
+
+    console.log(`[orchestrator:${jobId}] Bridge ${i + 1}/${bridgeSteps.length}: ${amount} USDC from ${step.chain} → Arc`);
     const destAddress = await bridgeUsdcToArc(privateKey, step.chain, amount);
-    console.log(`[orchestrator:${jobId}] Bridge done — USDC arrived at ${destAddress} on Arc`);
+    console.log(`[orchestrator:${jobId}] Bridge ${i + 1}/${bridgeSteps.length} done — USDC at ${destAddress} on Arc`);
   }
 
-  // Mark as PAYING with _bridgeKit flag so stepPay uses the EOA direct path
   await updateJobStatus(jobId, "PAYING", { quote: { ...job.quote, _bridgeKit: true } });
   await stepDirectArcPay(jobId);
 }

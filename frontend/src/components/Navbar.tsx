@@ -16,8 +16,18 @@ export default function Navbar() {
             </div>
             <span className="text-2xl font-black tracking-tighter text-[#132318]">Zerra</span>
           </Link>
-          {isConnected && (
-            <nav className="hidden sm:flex items-center gap-2">
+          <nav className="hidden sm:flex items-center gap-2">
+            <Link
+              to="/stores"
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                location.pathname === '/stores'
+                  ? 'bg-fin-dark text-white'
+                  : 'text-black/60 hover:text-black hover:bg-black/5'
+              }`}
+            >
+              Stores
+            </Link>
+            {isConnected && (
               <Link
                 to="/merchant"
                 className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
@@ -28,8 +38,8 @@ export default function Navbar() {
               >
                 Dashboard
               </Link>
-            </nav>
-          )}
+            )}
+          </nav>
         </div>
 
         <ConnectButton

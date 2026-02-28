@@ -2,15 +2,14 @@ import { scanBalances } from "../scanner/balanceScanner.js";
 import { getSwapProvider } from "../swap/swapProvider.js";
 import { config } from "../config/networks.js";
 
-// Circle Bridge Kit (CCTPv2) fee estimate — fast transfer ~1 bps of amount.
-// Use 0.1 USDC as a conservative fixed buffer across all test amounts.
-const GATEWAY_BRIDGE_FEE_USDC = 0.1;
-// Arc gas cost in USDC — session key EOA pays directly; Arc uses USDC as gas token.
-const ARC_GAS_FEE_USDC = 0.1;
+// Circle Bridge Kit (CCTPv2) fast transfer — near-zero protocol fee, ~0.005 USDC buffer per bridge.
+const GATEWAY_BRIDGE_FEE_USDC = 0.005;
+// Arc USDC gas cost per bridge operation (session key EOA pays Arc USDC gas after mint).
+const ARC_GAS_FEE_USDC = 0.01;
 // Fee buffer multiplier applied to all fee estimates
 const FEE_BUFFER = 1.1;
 // Gas buffer for Arc-direct payments (session key EOA pays Arc USDC gas)
-const ARC_DIRECT_GAS_BUFFER_USDC = 0.2;
+const ARC_DIRECT_GAS_BUFFER_USDC = 0.05;
 
 /**
  * Round a number to 6 decimal places (USDC precision).
@@ -35,8 +34,11 @@ function buildSourcePlan(balances, targetUsdc) {
   const sourcePlan = [];
   let remaining = targetUsdc;
 
-  // Sort chains: Base before Ethereum (lower gas preferred)
+  // Sort chains: Base before Ethereum (lower gas preferred).
+  // Exclude isDirect chains (arc-testnet) — they're handled by the arc-direct fast path
+  // and don't need bridging; including them here would generate invalid bridge-from-Arc steps.
   const chainOrder = config.sourceChains
+    .filter((c) => !c.isDirect)
     .map((c) => ({ ...c, balance: balances[c.key] }))
     .sort((a, b) => {
       // Prefer Base (domain 6) over Ethereum (domain 0)
@@ -92,11 +94,12 @@ function buildSourcePlan(balances, targetUsdc) {
  * Calculate the total fees with a 10% buffer.
  *
  * @param {number} swapFeeUsdc
+ * @param {number} bridgeCount - Number of source chains being bridged (default 1)
  * @returns {{ swapFee: string, bridgeFee: string, arcGas: string, totalFees: string }}
  */
-function calcFees(swapFeeUsdc) {
+function calcFees(swapFeeUsdc, bridgeCount = 1) {
   const swapFee = r6(swapFeeUsdc * FEE_BUFFER);
-  const bridgeFee = r6(GATEWAY_BRIDGE_FEE_USDC * FEE_BUFFER);
+  const bridgeFee = r6(GATEWAY_BRIDGE_FEE_USDC * bridgeCount * FEE_BUFFER);
   const arcGas = r6(ARC_GAS_FEE_USDC * FEE_BUFFER);
   const totalFees = r6(swapFee + bridgeFee + arcGas);
   return {
@@ -172,12 +175,22 @@ export async function getQuote(walletAddress, targetAmount, existingBalances = n
   }
 
   // The user must provide target + fees from their wallet.
-  // Estimate fixed fees upfront (bridge + arc gas) so the source plan correctly
-  // checks whether the user has enough total USDC. Swap fee is added later.
-  const fixedFeeEstimate = r6((GATEWAY_BRIDGE_FEE_USDC + ARC_GAS_FEE_USDC) * FEE_BUFFER);
+  //
+  // Two-pass fee estimation: first, do a preliminary scan to count how many source
+  // chains will be used (bridge fee scales per chain). Then compute the real fee and
+  // build the final source plan. This ensures multi-chain scenarios (e.g. 1 USDC from
+  // Base + 1 USDC from Ethereum) correctly account for two bridge operations.
+  //
+  // Pass 1 — count chains needed for just the target (no fees yet)
+  const { sourcePlan: prelimPlan } = buildSourcePlan(balances, target);
+  const estimatedBridgeCount = Math.max(1, prelimPlan.length);
+
+  const fixedFeeEstimate = r6(
+    (GATEWAY_BRIDGE_FEE_USDC * estimatedBridgeCount + ARC_GAS_FEE_USDC) * FEE_BUFFER
+  );
   const amountToSource = r6(target + fixedFeeEstimate);
 
-  // Build sourcing plan against the full amount the user needs to provide
+  // Pass 2 — build the final source plan against target + fees
   const { sourcePlan, shortfallUsdc } = buildSourcePlan(balances, amountToSource);
 
   if (shortfallUsdc > 0.01) {
@@ -218,7 +231,8 @@ export async function getQuote(walletAddress, targetAmount, existingBalances = n
     }
   }
 
-  const breakdown = calcFees(totalSwapFeeUsdc);
+  const finalBridgeCount = Math.max(1, sourcePlan.length);
+  const breakdown = calcFees(totalSwapFeeUsdc, finalBridgeCount);
   const userAuthorizes = r6(target + parseFloat(breakdown.totalFees));
 
   return {

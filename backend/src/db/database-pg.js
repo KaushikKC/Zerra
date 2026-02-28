@@ -225,6 +225,14 @@ export async function getMerchantBySlug(slug) {
   return rows[0] ?? null;
 }
 
+export async function getStorefrontsList() {
+  await ensureSchema();
+  const { rows } = await pool.query(
+    "SELECT wallet_address, display_name, slug, logo_url FROM merchants WHERE slug IS NOT NULL ORDER BY display_name ASC"
+  );
+  return rows;
+}
+
 export async function setMerchantWebhookUrl(walletAddress, webhookUrl) {
   await ensureSchema();
   await pool.query("UPDATE merchants SET webhook_url = $1 WHERE wallet_address = $2", [
