@@ -1,6 +1,9 @@
 import { useState, useEffect } from "react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { useAccount, useSignMessage } from "wagmi";
+import { useAccount, useSignMessage, useWriteContract } from "wagmi";
+import { parseUnits } from "viem";
+import { waitForTransactionReceipt } from "@wagmi/core";
+import { wagmiConfig } from "../config/wagmiConfig";
 import { toast } from "sonner";
 import {
   Copy,
@@ -28,6 +31,8 @@ import {
   BarChart2,
   Banknote,
   X,
+  ArrowDownToLine,
+  Wallet,
 } from "lucide-react";
 import { API_BASE } from "../config/wagmiConfig";
 
@@ -117,6 +122,23 @@ interface TreasuryJob {
   created_at: number
 }
 
+// ── Gateway constants ─────────────────────────────────────────────────────────
+const ARC_USDC = "0x3600000000000000000000000000000000000000" as `0x${string}`
+const GATEWAY_WALLET = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9" as `0x${string}`
+const ARC_CHAIN_ID = 5042002
+
+const ERC20_APPROVE_ABI = [
+  { name: "approve", type: "function", stateMutability: "nonpayable",
+    inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }],
+    outputs: [{ name: "", type: "bool" }] },
+] as const
+
+const GATEWAY_DEPOSIT_ABI = [
+  { name: "deposit", type: "function", stateMutability: "nonpayable",
+    inputs: [{ name: "token", type: "address" }, { name: "amount", type: "uint256" }],
+    outputs: [] },
+] as const
+
 // ── Status badge ──────────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: string }) {
@@ -147,6 +169,7 @@ function StatusBadge({ status }: { status: string }) {
 export default function MerchantDashboard() {
   const { address, isConnected } = useAccount();
   const { signMessageAsync } = useSignMessage();
+  const { writeContractAsync } = useWriteContract();
 
   const [merchant, setMerchant] = useState<MerchantProfile | null>(null);
   const [loading, setLoading] = useState(false);
@@ -214,6 +237,14 @@ export default function MerchantDashboard() {
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
 
+  // ── Arc Wallet / Gateway state ───────────────────────────────────────────────
+  const [arcBalance, setArcBalance] = useState<string | null>(null)
+  const [gatewayBalance, setGatewayBalance] = useState<string | null>(null)
+  const [balancesLoading, setBalancesLoading] = useState(false)
+  const [depositAmount, setDepositAmount] = useState("")
+  const [depositStep, setDepositStep] = useState<"idle" | "approving" | "depositing" | "done">("idle")
+  const [depositError, setDepositError] = useState<string | null>(null)
+
   // ── Treasury state ──────────────────────────────────────────────────────────
   const [treasuryRecipients, setTreasuryRecipients] = useState<TreasuryRecipient[]>([
     { address: "", amount: "", label: "" },
@@ -252,6 +283,7 @@ export default function MerchantDashboard() {
     loadWebhookDeliveries();
     loadSplitConfig();
     loadTreasuryJobs();
+    loadArcBalances();
   }, [merchant]);
 
   function loadPayments() {
@@ -346,6 +378,69 @@ export default function MerchantDashboard() {
       setTreasuryPending(false);
     }
   };
+
+  // ── Arc Wallet balances ───────────────────────────────────────────────────────
+  function loadArcBalances() {
+    if (!merchant) return
+    setBalancesLoading(true)
+    Promise.all([
+      fetch(`${API_BASE}/api/merchant/${merchant.wallet_address}/arc-balance`).then((r) => r.json()),
+      fetch(`${API_BASE}/api/merchant/${merchant.wallet_address}/gateway-balance`).then((r) => r.json()),
+    ])
+      .then(([arc, gw]) => {
+        setArcBalance(arc.balance ?? "0")
+        setGatewayBalance(gw.balance ?? "0")
+        setBalancesLoading(false)
+      })
+      .catch(() => setBalancesLoading(false))
+  }
+
+  async function handleGatewayDeposit() {
+    if (!merchant || !depositAmount) return
+    const amount = parseFloat(depositAmount)
+    if (isNaN(amount) || amount <= 0) return
+    setDepositStep("approving")
+    setDepositError(null)
+    try {
+      const amountRaw = parseUnits(depositAmount, 6)
+
+      // Step 1 — approve GatewayWallet to spend USDC
+      toast.info("Sign approval in your wallet…")
+      const approveHash = await writeContractAsync({
+        address: ARC_USDC,
+        abi: ERC20_APPROVE_ABI,
+        functionName: "approve",
+        args: [GATEWAY_WALLET, amountRaw],
+        chainId: ARC_CHAIN_ID,
+      })
+      toast.info("Waiting for approval confirmation…")
+      await waitForTransactionReceipt(wagmiConfig, { hash: approveHash, chainId: ARC_CHAIN_ID })
+
+      // Step 2 — deposit into Circle CCTP GatewayWallet on Arc
+      setDepositStep("depositing")
+      toast.info("Sign deposit in your wallet…")
+      const depositHash = await writeContractAsync({
+        address: GATEWAY_WALLET,
+        abi: GATEWAY_DEPOSIT_ABI,
+        functionName: "deposit",
+        args: [ARC_USDC, amountRaw],
+        chainId: ARC_CHAIN_ID,
+      })
+      toast.info("Waiting for deposit confirmation…")
+      await waitForTransactionReceipt(wagmiConfig, { hash: depositHash, chainId: ARC_CHAIN_ID })
+
+      setDepositStep("done")
+      setDepositAmount("")
+      toast.success(`${amount.toFixed(2)} USDC deposited to Arc Gateway!`)
+      // Refresh both balances after deposit (Circle indexes within ~30s)
+      setTimeout(loadArcBalances, 3000)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Deposit failed"
+      setDepositError(msg)
+      toast.error(msg)
+      setDepositStep("idle")
+    }
+  }
 
   function loadSplitConfig() {
     fetch(`${API_BASE}/api/merchant/${merchant!.wallet_address}/split`)
@@ -770,6 +865,7 @@ export default function MerchantDashboard() {
             onClick={() => {
               setActiveTab(t.id);
               if (t.id === "analytics" && !analytics) loadAnalytics();
+              if (t.id === "treasury") loadArcBalances();
             }}
             className={`flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-black transition-all ${
               activeTab === t.id
@@ -1842,6 +1938,98 @@ export default function MerchantDashboard() {
       {/* ── TAB: Treasury ───────────────────────────────────────────────────── */}
       {activeTab === "treasury" && (
         <div className="space-y-8">
+
+          {/* Arc Wallet Balances */}
+          <div className="grid sm:grid-cols-2 gap-5">
+            <div className="fin-card !p-7 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Wallet className="w-4 h-4 text-[#132318]/40" />
+                  <p className="text-[10px] font-black uppercase tracking-[0.3em] text-[#132318]/40">Arc Wallet</p>
+                </div>
+                <button onClick={loadArcBalances} className="text-[#132318]/20 hover:text-[#132318]/50 transition-colors">
+                  <RefreshCw className={`w-3.5 h-3.5 ${balancesLoading ? "animate-spin" : ""}`} />
+                </button>
+              </div>
+              <p className="text-4xl font-black text-[#132318] tracking-tighter">
+                {arcBalance ?? "—"} <span className="text-lg text-[#132318]/20 font-bold">USDC</span>
+              </p>
+              <p className="text-xs text-[#132318]/30 font-medium">Live balance on Arc Testnet</p>
+            </div>
+
+            <div className="fin-card !p-7 space-y-2 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-[#E1FF76]/10 rounded-full blur-[60px] -z-0" />
+              <div className="relative z-10">
+                <div className="flex items-center gap-2 mb-2">
+                  <ArrowDownToLine className="w-4 h-4 text-[#132318]/40" />
+                  <p className="text-[10px] font-black uppercase tracking-[0.3em] text-[#132318]/40">Circle Gateway</p>
+                </div>
+                <p className="text-4xl font-black text-[#132318] tracking-tighter">
+                  {gatewayBalance ?? "—"} <span className="text-lg text-[#132318]/20 font-bold">USDC</span>
+                </p>
+                <p className="text-xs text-[#132318]/30 font-medium">Indexed · Ready to bridge out</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Deposit to Arc Gateway */}
+          <div className="fin-card space-y-5">
+            <div>
+              <h2 className="font-black text-lg text-[#132318] tracking-tight">Deposit to Arc Gateway</h2>
+              <p className="text-sm text-[#132318]/50 mt-1">
+                Transfer your Arc USDC into the Circle CCTP GatewayWallet — enabling seamless cross-chain withdrawal to Ethereum or Base.
+              </p>
+            </div>
+
+            <div className="flex gap-3 items-center">
+              <div className="relative flex-1">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="Amount"
+                  className="input-field !text-2xl font-black pr-20"
+                  value={depositAmount}
+                  onChange={(e) => setDepositAmount(e.target.value)}
+                  disabled={depositStep !== "idle"}
+                />
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-black text-[#132318]/30">USDC</span>
+              </div>
+              {arcBalance && depositStep === "idle" && (
+                <button
+                  className="btn-secondary py-3 px-4 text-xs whitespace-nowrap"
+                  onClick={() => setDepositAmount(arcBalance)}
+                >
+                  Max
+                </button>
+              )}
+            </div>
+
+            {depositError && (
+              <p className="text-red-500 text-sm font-bold">{depositError}</p>
+            )}
+
+            {depositStep === "done" && (
+              <div className="p-4 rounded-2xl bg-green-50 border border-green-100">
+                <p className="text-sm font-black text-green-700">Deposit confirmed! Circle will index your balance within ~30 seconds.</p>
+              </div>
+            )}
+
+            <button
+              onClick={handleGatewayDeposit}
+              disabled={!depositAmount || depositStep !== "idle"}
+              className="btn-primary w-full py-4 justify-center disabled:opacity-50"
+            >
+              {depositStep === "approving" && <><Loader2 className="w-5 h-5 animate-spin" /> Approving…</>}
+              {depositStep === "depositing" && <><Loader2 className="w-5 h-5 animate-spin" /> Depositing…</>}
+              {(depositStep === "idle" || depositStep === "done") && <><ArrowDownToLine className="w-5 h-5" /> Deposit to Arc Gateway</>}
+            </button>
+
+            <p className="text-xs text-[#132318]/30 font-medium text-center">
+              Two wallet confirmations required (approve + deposit) · Arc Testnet only
+            </p>
+          </div>
+
           <div className="p-5 rounded-2xl bg-[#132318]/[0.03] border border-[#132318]/5 flex items-start gap-4">
             <Banknote className="w-5 h-5 text-[#132318]/30 flex-shrink-0 mt-0.5" />
             <div>

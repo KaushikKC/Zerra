@@ -798,4 +798,43 @@ router.get("/treasury/payouts/:merchantAddress", async (req, res) => {
   }
 });
 
+// ── Arc Wallet: live USDC balance on Arc Testnet ─────────────────────────────
+router.get("/merchant/:address/arc-balance", async (req, res) => {
+  try {
+    const { destinationChain } = config;
+    const { createPublicClient } = await import("viem");
+    const client = createPublicClient({ transport: http(destinationChain.rpcUrl) });
+    const raw = await client.readContract({
+      address: destinationChain.usdcAddress,
+      abi: [{ name: "balanceOf", type: "function", stateMutability: "view",
+              inputs: [{ name: "account", type: "address" }],
+              outputs: [{ name: "", type: "uint256" }] }],
+      functionName: "balanceOf",
+      args: [req.params.address],
+    });
+    res.json({ balance: formatUnits(raw, 6) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Circle Gateway: indexed balance for merchant on Arc domain (26) ──────────
+router.get("/merchant/:address/gateway-balance", async (req, res) => {
+  try {
+    const { gateway, destinationChain } = config;
+    const r = await fetch(`${gateway.apiUrl}/v1/balances`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: "USDC",
+        sources: [{ domain: destinationChain.domain, depositor: req.params.address }],
+      }),
+    });
+    const data = await r.json();
+    res.json({ balance: data.balances?.[0]?.balance ?? "0" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
