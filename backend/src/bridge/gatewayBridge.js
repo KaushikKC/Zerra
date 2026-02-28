@@ -258,40 +258,70 @@ export async function callEoaApproveAndDeposit(chainKey, signerPrivateKey, amoun
 }
 
 /**
- * Verify on-chain that the GatewayWallet contract has recorded the deposit.
- * Uses availableBalance(token, depositor) — NOTE: token is the FIRST argument.
+ * Poll Circle's Gateway /v1/balances endpoint until the depositor's indexed balance
+ * reaches the required amount.
  *
- * This is an immediate on-chain check (no Circle API involved) and should
- * return the balance as soon as the deposit tx is mined.
+ * This checks the EXACT same balance that /v1/transfer validates — Circle's off-chain
+ * indexed registry. The on-chain GatewayWallet.availableBalance() updates immediately
+ * after the deposit tx mines, but /v1/transfer uses Circle's backend index which has
+ * a variable lag (10s–3min on testnet). Polling /v1/balances guarantees we only
+ * submit the BurnIntent when Circle's index is ready.
  *
- * @returns {Promise<number>} available balance in USDC (human-readable)
+ * Official ref: arc-multichain-wallet/lib/circle/gateway-sdk.ts fetchGatewayBalance()
+ *
+ * @param {string} depositorAddress - Circle wallet that made the deposit
+ * @param {number} sourceDomain     - Gateway domain ID (6 = base-sepolia, 26 = arc-testnet)
+ * @param {number} requiredAmount   - Required USDC (human-readable, e.g. 3.673)
+ * @returns {Promise<void>} Resolves when Circle has indexed the balance
  */
-async function checkOnchainBalance(depositorAddress, usdcAddress, chainConfig) {
-  const AVAILABLE_BALANCE_ABI = [
-    {
-      name: "availableBalance",
-      type: "function",
-      stateMutability: "view",
-      // IMPORTANT: token is FIRST, depositor is SECOND
-      inputs: [
-        { name: "token", type: "address" },
-        { name: "depositor", type: "address" },
-      ],
-      outputs: [{ name: "", type: "uint256" }],
-    },
-  ];
+async function pollGatewayIndexedBalance(depositorAddress, sourceDomain, requiredAmount) {
+  // Circle testnet indexer lags 5-15 minutes behind the chain tip.
+  // Poll for up to 20 minutes total (120 × 10s).
+  const MAX_ATTEMPTS = 120;
+  const POLL_INTERVAL_MS = 10_000;
 
-  const chain = toViemChain(chainConfig);
-  const publicClient = createPublicClient({ chain, transport: http(chainConfig.rpcUrl) });
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(`${config.gateway.apiUrl}/v1/balances`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: "USDC",
+          sources: [{ domain: sourceDomain, depositor: depositorAddress }],
+        }),
+      });
 
-  const raw = await publicClient.readContract({
-    address: config.gateway.walletContract,
-    abi: AVAILABLE_BALANCE_ABI,
-    functionName: "availableBalance",
-    args: [usdcAddress, depositorAddress],
-  });
+      if (res.ok) {
+        const data = await res.json();
+        const balanceEntry = Array.isArray(data.balances) ? data.balances[0] : null;
 
-  return Number(raw) / 1_000_000;
+        // IMPORTANT: Circle Gateway /v1/balances returns balance as a human-readable
+        // decimal string (e.g. "3.673000"), NOT an atomic integer ("3673000").
+        // Parse with parseFloat, compare directly against requiredAmount (also USDC).
+        const balanceUsdc = parseFloat(balanceEntry?.balance ?? "0") || 0;
+        console.log(`[gatewayBridge] Circle indexed balance (attempt ${attempt}/${MAX_ATTEMPTS}): ${balanceUsdc} USDC (need ${requiredAmount})`);
+
+        if (balanceUsdc >= requiredAmount - 0.001) {
+          console.log(`[gatewayBridge] ✓ Circle Gateway balance confirmed — submitting BurnIntent`);
+          return;
+        }
+      } else {
+        const errText = await res.text();
+        console.log(`[gatewayBridge] /v1/balances returned ${res.status}: ${errText}`);
+      }
+    } catch (err) {
+      console.log(`[gatewayBridge] /v1/balances error (attempt ${attempt}): ${err.message}`);
+    }
+
+    if (attempt < MAX_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    }
+  }
+
+  throw new Error(
+    `Circle Gateway balance not indexed for ${depositorAddress} after ${MAX_ATTEMPTS} attempts (${MAX_ATTEMPTS * POLL_INTERVAL_MS / 1000}s). ` +
+    `Deposit may still be processing — try retrying the job.`
+  );
 }
 
 /**
@@ -361,21 +391,15 @@ export async function initiateTransfer(
     const circleFeeBuffer = amountRaw * BigInt(5) / BigInt(1000); // 0.5% ≥ actual fee ~0.277%
     const burnIntentValue = amountRaw - circleFeeBuffer;
 
-    // Step 1: Verify on-chain that GatewayWallet recorded the deposit.
-    // availableBalance(token, depositor) — token is first arg (confirmed from ABI).
-    const onchainBalance = await checkOnchainBalance(
+    // Step 1: Poll Circle's /v1/balances until the deposit is indexed.
+    // This is the same balance /v1/transfer checks — we must wait for it before
+    // submitting the BurnIntent. (On-chain availableBalance() is NOT sufficient;
+    // Circle's off-chain indexer has a separate lag.)
+    await pollGatewayIndexedBalance(
       depositorAddress,
-      sourceChainConfig.usdcAddress,
-      sourceChainConfig
+      sourceDomain,
+      parseFloat(plan.amount)
     );
-    console.log(`[gatewayBridge] On-chain availableBalance for ${depositorAddress}: ${onchainBalance} USDC (need ${plan.amount})`);
-    if (onchainBalance < parseFloat(plan.amount) - 0.001) {
-      throw new Error(
-        `On-chain deposit not confirmed for ${depositorAddress}: ` +
-        `available ${onchainBalance}, required ${plan.amount}`
-      );
-    }
-    console.log(`[gatewayBridge] ✓ On-chain balance confirmed`);
 
     // sourceDepositor == sourceSigner (self-signed, Circle or EOA)
     const burnIntentMessage = {
@@ -430,15 +454,11 @@ export async function initiateTransfer(
 
     // Step 2: Submit BurnIntent to Circle Gateway.
     //
-    // With Circle SDK deposits (circleWalletId set): Circle's indexer knows about
-    // the deposit IMMEDIATELY, so the BurnIntent should be accepted on the first try.
-    // We keep a short 3-attempt retry for transient network errors only.
-    //
-    // With raw EOA deposits (circleWalletId null): Circle's testnet indexer may lag
-    // 15+ minutes. We retry aggressively (30×30s). The on-chain balance was verified
-    // above so we know the deposit is there.
-    const BURN_MAX_ATTEMPTS = circleWalletId ? 3 : 30;
-    const BURN_RETRY_DELAY_MS = circleWalletId ? 3_000 : 30_000;
+    // /v1/balances already confirmed the deposit is indexed (Step 1 above),
+    // so /v1/transfer should accept on the first try. Keep 3 retries as a
+    // safety net for transient race conditions only.
+    const BURN_MAX_ATTEMPTS = 3;
+    const BURN_RETRY_DELAY_MS = 5_000;
 
     let transferData;
     for (let attempt = 1; attempt <= BURN_MAX_ATTEMPTS; attempt++) {

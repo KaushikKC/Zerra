@@ -4,11 +4,13 @@ import { scanBalances } from "../scanner/balanceScanner.js";
 import { getQuote } from "../router/quoteEngine.js";
 import { generateSessionKey, encryptKey } from "../aa/sessionKeys.js";
 import { getSmartAccountAddressForKey } from "../aa/smartAccount.js";
+import { createCircleGatewayWallet, ensureCircleWalletHasGas } from "../circle/circleDeposit.js";
 import {
   saveSessionKey,
   getSessionKey,
   getJob,
   getMerchantWebhookDeliveries,
+  updateSessionKeyCircleWallet,
 } from "../db/database.js";
 import {
   createPaymentJob,
@@ -122,15 +124,43 @@ router.post("/session/create", async (req, res) => {
       expiry,
     });
 
+    // For cross-chain: create the Circle-managed EOA wallet NOW so the user's fundTx
+    // sends USDC directly to it. Circle's indexer tracks direct ERC-20 transfers but
+    // NOT ERC-4337 internal transfers from EntryPoint, so this guarantees the balance
+    // check in circleApproveAndDeposit passes without any testnet indexer lag.
+    let circleWalletAddress = null;
+    if (!isDirectPlan) {
+      try {
+        const created = await createCircleGatewayWallet();
+        updateSessionKeyCircleWallet(payerAddress, created.walletId, created.walletAddress);
+        circleWalletAddress = created.walletAddress;
+        console.log(`[session/create] Circle wallet ready for direct funding: ${circleWalletAddress}`);
+        // Pre-fund ETH in the background so Circle's indexer has ~30s to process it
+        // before the orchestrator reaches stepDeposit. Non-blocking — never fails the request.
+        const gasChain = config.sourceChains.find((c) => !c.isDirect);
+        if (gasChain) {
+          ensureCircleWalletHasGas(circleWalletAddress, gasChain).catch((err) =>
+            console.warn(`[session/create] ETH pre-fund failed (non-fatal):`, err.message)
+          );
+        }
+      } catch (err) {
+        console.warn(`[session/create] Circle wallet pre-creation failed — will create lazily in stepDeposit:`, err.message);
+      }
+    }
+
     // Build fund transactions — user transfers assets from their EOA to the
-    // executing account (session key EOA for Arc-direct, smart account for cross-chain).
+    // executing account:
+    //   Arc-direct   → session key EOA (holds Arc USDC, pays gas directly)
+    //   Cross-chain  → Circle wallet (direct transfer so Circle indexes it correctly)
+    //   Fallback     → smart account (legacy path when Circle wallet unavailable)
     const fundTxes = [];
     for (const step of plan) {
       const chainConfig = config.sourceChains.find((c) => c.key === step.chain);
       if (!chainConfig) continue;
 
-      // Arc-direct: fund the session key EOA. Cross-chain: fund the smart account.
-      const recipient = chainConfig.isDirect ? sessionAddress : smartAccountAddress;
+      const recipient = chainConfig.isDirect
+        ? sessionAddress
+        : (circleWalletAddress ?? smartAccountAddress);
 
       if (step.type === "swap") {
         fundTxes.push({

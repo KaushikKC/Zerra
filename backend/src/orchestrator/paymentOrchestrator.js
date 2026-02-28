@@ -193,6 +193,14 @@ async function stepScan(jobId, opts) {
   const job = getJob(jobId);
   console.log(`[orchestrator:${jobId}] SCANNING balances for ${job.payer_address}`);
 
+  // If a Circle wallet was pre-created during session/create, the user funded it
+  // directly — scan that address instead of the smart account (which has no USDC).
+  const sessionKeyRow = getSessionKey(job.payer_address);
+  const scanAddress = sessionKeyRow?.circle_wallet_address ?? job.payer_address;
+  if (scanAddress !== job.payer_address) {
+    console.log(`[orchestrator:${jobId}] Pre-funded Circle wallet detected — scanning ${scanAddress}`);
+  }
+
   // Retry up to 6× (max ~30s) to handle RPC lag: the backend node may take a few
   // seconds to index the block that the frontend already confirmed via receipt.
   const MAX_RETRIES = 6;
@@ -200,7 +208,7 @@ async function stepScan(jobId, opts) {
   let balances;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    balances = await scanBalances(job.payer_address);
+    balances = await scanBalances(scanAddress);
     const totalUsdc = Object.values(balances).reduce(
       (sum, b) => sum + parseFloat(b.usdc ?? "0"),
       0
@@ -357,11 +365,15 @@ async function stepDeposit(jobId) {
 
     // ── Get or create a Circle-managed EOA wallet for this session ──────────
     // The Circle wallet is the Gateway depositor + BurnIntent signer.
-    // Using Circle SDK for approve+deposit means Circle's indexer knows immediately
-    // (no testnet delay), so the BurnIntent is accepted without waiting.
+    // Preferred path: Circle wallet was pre-created in POST /api/session/create
+    // and the user funded it directly — Circle's indexer already has the balance.
+    // Fallback: create it lazily here and transfer via ERC-4337 (legacy).
 
     let circleWalletId = sessionKeyRow.circle_wallet_id;
     let circleWalletAddress = sessionKeyRow.circle_wallet_address;
+
+    // Track whether the wallet was pre-funded by the user (direct transfer, indexed by Circle)
+    const wasPreFunded = !!circleWalletId;
 
     if (!circleWalletId) {
       console.log(`[orchestrator:${jobId}] Creating Circle gateway wallet for payer ${job.payer_address}...`);
@@ -373,18 +385,23 @@ async function stepDeposit(jobId) {
       // Re-fetch the row so stepTransfer can read the updated addresses
       sessionKeyRow = getSessionKey(job.payer_address);
     } else {
-      console.log(`[orchestrator:${jobId}] Using existing Circle wallet: ${circleWalletAddress} (id: ${circleWalletId})`);
+      console.log(`[orchestrator:${jobId}] Using pre-funded Circle wallet: ${circleWalletAddress} (id: ${circleWalletId})`);
     }
 
-    // Step 1: Smart account transfers USDC to Circle wallet address (UserOp, Pimlico-sponsored)
-    const transferTx = buildTransferToEoaTx(chainKey, totalUsdc.toFixed(6), circleWalletAddress);
-    const { txHash } = await sendBatchUserOp(client, [transferTx]);
-    depositTxHashes[chainKey] = txHash;
-    console.log(`[orchestrator:${jobId}] USDC transferred to Circle wallet on ${chainKey}: ${txHash}`);
+    if (wasPreFunded) {
+      // User funded the Circle wallet directly via fundTxes — Circle's indexer
+      // already has the correct balance. No ERC-4337 transfer needed.
+      console.log(`[orchestrator:${jobId}] Circle wallet pre-funded by user — skipping ERC-4337 transfer`);
+    } else {
+      // Legacy fallback: USDC is in the smart account. Transfer it to Circle wallet
+      // via ERC-4337 UserOp (Pimlico-sponsored). Circle may lag on indexing this.
+      const transferTx = buildTransferToEoaTx(chainKey, totalUsdc.toFixed(6), circleWalletAddress);
+      const { txHash } = await sendBatchUserOp(client, [transferTx]);
+      depositTxHashes[chainKey] = txHash;
+      console.log(`[orchestrator:${jobId}] USDC transferred to Circle wallet on ${chainKey}: ${txHash}`);
+    }
 
-    // Step 2: Circle wallet calls approve+deposit via Circle SDK.
-    // circleApproveAndDeposit auto-funds ETH for gas and waits for Circle to
-    // index the USDC before submitting — eliminates all testnet indexer lag.
+    // Circle wallet calls approve+deposit via Circle SDK.
     const depositHash = await circleApproveAndDeposit(circleWalletId, circleWalletAddress, chainKey, totalUsdc.toFixed(6));
     depositTxHashes[`${chainKey}_deposit`] = depositHash;
     console.log(`[orchestrator:${jobId}] Circle wallet deposited on ${chainKey}: ${depositHash}`);

@@ -54,7 +54,7 @@ function toViemChain(chainConfig) {
  * @param {string} walletAddress - Circle EOA wallet address
  * @param {object} chainConfig   - From config.sourceChains
  */
-async function ensureCircleWalletHasGas(walletAddress, chainConfig) {
+export async function ensureCircleWalletHasGas(walletAddress, chainConfig) {
   const MIN_GAS_WEI = parseUnits("0.0005", 18); // enough for 2 txs with HIGH fee
   const FUND_AMOUNT_WEI = parseUnits("0.002", 18);
 
@@ -182,11 +182,15 @@ export async function circleApproveAndDeposit(walletId, walletAddress, chainKey,
   // Step 1: approve(gatewayWallet, amount) on USDC contract.
   //
   // MUST use callData (not abiFunctionSignature) for approve.
-  // Circle's SDK pre-checks its INDEXED token balance when abiFunctionSignature is used.
-  // USDC arrived via ERC-4337 UserOp → Circle's indexer never sees it → indexed balance = 0.
-  // For approve(), the on-chain state IS correct (USDC is there), but Circle would reject
-  // the call based on its stale indexed balance. callData bypasses this check.
-  // approve() does not need to be tracked by Circle's registry — only deposit() does.
+  //
+  // Circle's API has a pre-check bug: when abiFunctionSignature is used, it validates
+  // the `amount` parameter against its INDEXED token balance — even for approve(), which
+  // does not require any token balance on-chain. This causes:
+  //   "the asset amount owned by the wallet is insufficient for the transaction"
+  // even when the USDC is demonstrably present (scan found it, deposit works fine).
+  //
+  // callData bypasses this pre-check entirely. The approve() tx executes correctly
+  // on-chain regardless of indexed balance because approve() never transfers tokens.
   const approveCallData = encodeFunctionData({
     abi: [{ name: "approve", type: "function", stateMutability: "nonpayable",
       inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }],
@@ -194,16 +198,33 @@ export async function circleApproveAndDeposit(walletId, walletAddress, chainKey,
     functionName: "approve",
     args: [gatewayWallet, amountRaw],
   });
-  console.log(`[circleDeposit] Circle wallet calling approve(${amountUsdc} USDC) via callData...`);
-  const approveRes = await client.createContractExecutionTransaction({
-    walletId,
-    contractAddress: usdcAddress,
-    callData: approveCallData,
-    fee: { type: "level", config: { feeLevel: "HIGH" } },
-  });
-
-  const approveId = approveRes.data?.id;
-  if (!approveId) throw new Error("[circleDeposit] No challenge ID returned for approve tx");
+  // Circle's indexer has a lag for brand-new wallets — it may not yet have indexed
+  // the ETH or USDC balances even after on-chain confirmation. Retry up to 18× with
+  // 10s delay (3 min total) until Circle's indexed balance is ready.
+  const APPROVE_MAX_RETRIES = 18;
+  let approveId;
+  for (let attempt = 1; attempt <= APPROVE_MAX_RETRIES; attempt++) {
+    try {
+      console.log(`[circleDeposit] Circle wallet calling approve(${amountUsdc} USDC) via callData (attempt ${attempt}/${APPROVE_MAX_RETRIES})...`);
+      const approveRes = await client.createContractExecutionTransaction({
+        walletId,
+        contractAddress: usdcAddress,
+        callData: approveCallData,
+        fee: { type: "level", config: { feeLevel: "HIGH" } },
+      });
+      approveId = approveRes.data?.id;
+      if (!approveId) throw new Error("[circleDeposit] No challenge ID returned for approve tx");
+      break; // success — exit retry loop
+    } catch (err) {
+      const msg = String(err?.message ?? err);
+      if (msg.toLowerCase().includes("insufficient") && attempt < APPROVE_MAX_RETRIES) {
+        console.log(`[circleDeposit] Circle wallet not indexed yet (attempt ${attempt}/${APPROVE_MAX_RETRIES}), retrying in 10s...`);
+        await new Promise((r) => setTimeout(r, 10_000));
+      } else {
+        throw err;
+      }
+    }
+  }
   const approveTxHash = await waitForCircleTx(approveId);
   console.log(`[circleDeposit] approve confirmed: ${approveTxHash}`);
 
@@ -212,15 +233,8 @@ export async function circleApproveAndDeposit(walletId, walletAddress, chainKey,
   // Circle's /v1/transfer (BurnIntent submission) checks Circle's INTERNAL deposit
   // registry, NOT on-chain state. This registry is only updated when Circle SDK
   // submits a "deposit" call using abiFunctionSignature — Circle parses the function
-  // name, identifies it as a Gateway deposit, and immediately records it internally.
-  //
-  // Using callData bypasses the pre-check but also bypasses Circle's registry update,
-  // so /v1/transfer still sees "available 0" even though the on-chain balance is correct.
-  //
-  // Unlike approve() on the USDC contract, Circle's pre-check for deposit() on the
-  // GatewayWallet contract appears to be ETH-only (gas) — Circle does not pre-check
-  // the indexed USDC balance when the target is their own GatewayWallet contract.
-  // The on-chain transferFrom succeeds because the USDC IS there (sent via UserOp earlier).
+  // name, identifies it as a Gateway deposit, and records it internally so that
+  // the subsequent BurnIntent is accepted immediately without indexer lag.
   console.log(`[circleDeposit] Circle wallet calling deposit(${amountUsdc} USDC)...`);
   const depositRes = await client.createContractExecutionTransaction({
     walletId,

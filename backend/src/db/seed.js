@@ -4,14 +4,16 @@
  * Creates a "Arc Dev Tools" merchant with 3 digital products and a
  * subscription tier. Safe to call multiple times (idempotent).
  *
+ * Set SEED_FORCE=1 to reset and re-create the demo store (clears slug + products).
+ *
  * The merchant address is read from DEMO_MERCHANT_ADDRESS env var.
  * If not set, uses PRIVATE_KEY_RELAYER to derive the address.
  */
 
 import { privateKeyToAccount } from "viem/accounts";
-import { getMerchant } from "./database.js";
+import { getMerchant, setMerchantSlug } from "./database.js";
 import { registerMerchant } from "../merchant/merchant.js";
-import { setupSlug, upsertProduct, getStorefront } from "../storefront/storefront.js";
+import { setupSlug, upsertProduct, getStorefront, removeProduct } from "../storefront/storefront.js";
 
 export async function seedDemoData() {
   // ── Derive merchant address ─────────────────────────────────────────────────
@@ -27,12 +29,20 @@ export async function seedDemoData() {
   }
 
   const slug = "arc-dev";
+  const forceReseed = process.env.SEED_FORCE === "1" || process.env.SEED_FORCE === "true";
 
-  // ── Skip if already seeded ─────────────────────────────────────────────────
+  // ── Skip if already seeded (unless SEED_FORCE) ─────────────────────────────────
   const existing = getStorefront(slug);
   if (existing) {
-    console.log(`[seed] Demo storefront '${slug}' already exists — skipping`);
-    return;
+    if (forceReseed) {
+      const addr = existing.merchant.walletAddress;
+      for (const p of existing.products) removeProduct(p.id, addr);
+      setMerchantSlug(addr, null);
+      console.log(`[seed] Reset demo storefront '${slug}' (cleared slug + ${existing.products.length} products)`);
+    } else {
+      console.log(`[seed] Demo storefront '${slug}' already exists — skipping (set SEED_FORCE=1 to reset)`);
+      return;
+    }
   }
 
   // ── Register merchant ──────────────────────────────────────────────────────
@@ -63,7 +73,7 @@ export async function seedDemoData() {
     description:
       "100,000 Arc RPC API calls with guaranteed uptime. Instant activation. " +
       "Perfect for testing your DApp before mainnet. Valid 30 days.",
-    price: "5",
+    price: "1",
     imageUrl: null,
     sortOrder: 0,
   });
@@ -73,7 +83,7 @@ export async function seedDemoData() {
     description:
       "Exclusive access to mint 1 NFT from the Arc Genesis Collection. " +
       "Limited to 1,000 total. Token delivered to your Arc wallet within 24 hours.",
-    price: "15",
+    price: "2",
     imageUrl: null,
     sortOrder: 1,
   });
@@ -83,7 +93,7 @@ export async function seedDemoData() {
     description:
       "Full Arc SDK access, dedicated RPC endpoint, on-chain analytics dashboard, " +
       "and priority Discord support. 90-day access. Includes testnet faucet credits.",
-    price: "25",
+    price: "3",
     imageUrl: null,
     sortOrder: 2,
   });
@@ -93,7 +103,7 @@ export async function seedDemoData() {
     description:
       "Unlimited API access, 1M RPC calls/month, advanced on-chain analytics, " +
       "priority Discord support, and early access to new Arc features. Cancel anytime.",
-    price: "9",
+    price: "1",
     type: "subscription",
     intervalDays: 30,
     imageUrl: null,
