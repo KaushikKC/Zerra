@@ -102,8 +102,9 @@ export default function Progress() {
   const txHashes = job?.txHashes ?? null
 
   // Show swap step only if job actually has swap steps in the source plan
-  const sourcePlan = (job?.sourcePlan as Array<{ type: string }> | null) ?? []
-  const hasSwap = sourcePlan.some((s) => s.type === 'swap')
+  const rawPlan = job?.sourcePlan
+  const sourcePlan = Array.isArray(rawPlan) ? rawPlan : []
+  const hasSwap = sourcePlan.some((s) => s && typeof s === 'object' && s.type === 'swap')
   const visibleSteps = STEPS.filter((s) => s.id !== 'swap' || hasSwap)
 
   return (

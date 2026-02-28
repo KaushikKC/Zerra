@@ -214,7 +214,7 @@ export default function Receipt() {
           )}
 
           {/* ── Liquidity sources ─────────────────────────────────────────── */}
-          {receipt.status === 'COMPLETE' && receipt.sourcePlan && receipt.sourcePlan.length > 0 && (
+          {receipt.status === 'COMPLETE' && Array.isArray(receipt.sourcePlan) && receipt.sourcePlan.length > 0 && (
             <>
               <Tear />
               <div className="px-8 py-6">
