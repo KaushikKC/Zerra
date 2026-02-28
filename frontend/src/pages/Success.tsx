@@ -1,14 +1,48 @@
 import { useParams, Link } from 'react-router-dom'
+import { useEffect, useRef } from 'react'
 import { CheckCircle, ExternalLink, RefreshCw, PartyPopper, Share2 } from 'lucide-react'
+import { toast } from 'sonner'
+import confetti from 'canvas-confetti'
 import { usePayment } from '../hooks/usePayment'
 
 export default function Success() {
   const { jobId } = useParams<{ jobId: string }>()
   const { data: job } = usePayment(jobId)
+  const confettiFired = useRef(false)
 
   const payTxHash = job?.txHashes?.pay ?? null
   const amount = job?.quote?.merchantReceives ?? job?.targetAmount ?? '—'
   const label = job?.label ?? 'Payment'
+
+  // Fire confetti + toast exactly once when payment is confirmed
+  useEffect(() => {
+    if (job?.status === 'COMPLETE' && !confettiFired.current) {
+      confettiFired.current = true
+      toast.success(`${amount} USDC settled on Arc!`, { duration: 6000 })
+      confetti({
+        particleCount: 120,
+        spread: 80,
+        origin: { y: 0.55 },
+        colors: ['#E1FF76', '#132318', '#FFFCF5', '#a3e635'],
+        scalar: 1.1,
+      })
+      // Second burst for drama
+      setTimeout(() => confetti({
+        particleCount: 60,
+        angle: 60,
+        spread: 55,
+        origin: { x: 0, y: 0.6 },
+        colors: ['#E1FF76', '#FFFCF5'],
+      }), 250)
+      setTimeout(() => confetti({
+        particleCount: 60,
+        angle: 120,
+        spread: 55,
+        origin: { x: 1, y: 0.6 },
+        colors: ['#E1FF76', '#FFFCF5'],
+      }), 400)
+    }
+  }, [job?.status, amount])
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-24 sm:py-48 text-center">
@@ -82,7 +116,31 @@ export default function Success() {
         </div>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-6 justify-center">
+      <div className="flex flex-col sm:flex-row gap-6 justify-center flex-wrap">
+        {jobId && (
+          <Link
+            to={`/receipt/${jobId}`}
+            className="btn-secondary !text-xl !px-12 !py-6"
+          >
+            View Receipt <ExternalLink className="w-6 h-6" />
+          </Link>
+        )}
+        {jobId && (
+          <button
+            className="btn-secondary !text-xl !px-12 !py-6"
+            onClick={async () => {
+              const url = `${window.location.origin}/receipt/${jobId}`
+              if (navigator.share) {
+                await navigator.share({ title: 'Zerra Payment Receipt', text: `${amount} USDC settled on Arc`, url })
+              } else {
+                await navigator.clipboard.writeText(url)
+                toast.success('Receipt link copied!')
+              }
+            }}
+          >
+            <Share2 className="w-6 h-6" /> Share Receipt
+          </button>
+        )}
         {payTxHash && (
           <a
             href={`https://testnet.arcscan.app/tx/${payTxHash}`}

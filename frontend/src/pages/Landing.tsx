@@ -75,20 +75,31 @@ export default function Landing() {
               </Link>
             </div>
 
-            {/* Live Stats Strip */}
-            <div className="mt-10 flex flex-wrap items-center gap-x-6 gap-y-2 text-[#132318]/50 font-bold text-sm">
+            {/* Live Stats */}
+            <div className="mt-12 grid grid-cols-2 sm:grid-cols-4 gap-4">
               {stats ? (
                 <>
-                  <span className="font-black text-[#132318]">{stats.totalPayments}</span> Payments
-                  <span className="text-[#132318]/20">·</span>
-                  <span className="font-black text-[#132318]">${stats.totalUsdcSettled}</span> USDC Settled
-                  <span className="text-[#132318]/20">·</span>
-                  <span className="font-black text-[#132318]">{stats.chainsAbstracted}</span> Chains Abstracted
-                  <span className="text-[#132318]/20">·</span>
-                  <span className="font-black text-[#132318]">{stats.merchantCount}</span> Merchants
+                  <div className="rounded-2xl bg-[#132318]/5 border border-[#132318]/10 px-5 py-4">
+                    <div className="text-2xl font-black text-[#132318] tabular-nums">{stats.totalPayments}</div>
+                    <div className="text-xs font-bold uppercase tracking-wider text-[#132318]/50 mt-0.5">Payments</div>
+                  </div>
+                  <div className="rounded-2xl bg-[#132318]/5 border border-[#132318]/10 px-5 py-4">
+                    <div className="text-2xl font-black text-[#132318] tabular-nums">${stats.totalUsdcSettled}</div>
+                    <div className="text-xs font-bold uppercase tracking-wider text-[#132318]/50 mt-0.5">USDC Settled</div>
+                  </div>
+                  <div className="rounded-2xl bg-[#132318]/5 border border-[#132318]/10 px-5 py-4">
+                    <div className="text-2xl font-black text-[#132318] tabular-nums">{stats.chainsAbstracted}</div>
+                    <div className="text-xs font-bold uppercase tracking-wider text-[#132318]/50 mt-0.5">Chains</div>
+                  </div>
+                  <div className="rounded-2xl bg-[#132318]/5 border border-[#132318]/10 px-5 py-4">
+                    <div className="text-2xl font-black text-[#132318] tabular-nums">{stats.merchantCount}</div>
+                    <div className="text-xs font-bold uppercase tracking-wider text-[#132318]/50 mt-0.5">Merchants</div>
+                  </div>
                 </>
               ) : (
-                <span className="text-[#132318]/20 animate-pulse">Loading stats…</span>
+                <div className="col-span-2 sm:col-span-4 rounded-2xl bg-[#132318]/5 border border-[#132318]/10 px-5 py-4">
+                  <span className="text-[#132318]/40 text-sm animate-pulse">Loading stats…</span>
+                </div>
               )}
             </div>
           </div>

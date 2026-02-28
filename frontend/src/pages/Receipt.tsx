@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { CheckCircle2, Clock, XCircle, AlertTriangle, ExternalLink, Loader2 } from 'lucide-react'
+import { CheckCircle2, Clock, XCircle, AlertTriangle, ExternalLink, Loader2, Share2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { API_BASE } from '../config/wagmiConfig'
 
 interface SourceStep {
@@ -134,17 +135,33 @@ export default function Receipt() {
           )}
         </div>
 
-        {/* Tx hash link */}
-        {receipt.txHash && (
-          <a
-            href={`https://testnet.arcscan.app/tx/${receipt.txHash}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn-secondary w-full py-4 justify-center"
+        {/* Tx hash + share */}
+        <div className="flex flex-col sm:flex-row gap-3">
+          {receipt.txHash && (
+            <a
+              href={`https://testnet.arcscan.app/tx/${receipt.txHash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-secondary flex-1 py-4 justify-center"
+            >
+              <ExternalLink className="w-5 h-5" /> View on ArcScan
+            </a>
+          )}
+          <button
+            className="btn-secondary flex-1 py-4 justify-center"
+            onClick={async () => {
+              const url = window.location.href
+              if (navigator.share) {
+                await navigator.share({ title: 'Zerra Receipt', text: `${receipt.merchantReceives ?? receipt.targetAmount} USDC payment receipt`, url })
+              } else {
+                await navigator.clipboard.writeText(url)
+                toast.success('Receipt link copied!')
+              }
+            }}
           >
-            <ExternalLink className="w-5 h-5" /> View on ArcScan
-          </a>
-        )}
+            <Share2 className="w-5 h-5" /> Share
+          </button>
+        </div>
 
         {/* Chain Provenance Panel */}
         {receipt.status === 'COMPLETE' && receipt.sourcePlan && receipt.sourcePlan.length > 0 && (

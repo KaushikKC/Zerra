@@ -1,6 +1,7 @@
 import { useParams, Link } from 'react-router-dom'
 import { useState } from 'react'
 import { AlertTriangle, RefreshCw, Loader2, ArrowLeft, RotateCcw } from 'lucide-react'
+import { toast } from 'sonner'
 import { usePayment, retryJob } from '../hooks/usePayment'
 import { useNavigate } from 'react-router-dom'
 import { API_BASE } from '../config/wagmiConfig'
@@ -33,9 +34,17 @@ export default function PaymentFailed() {
       })
       const data = await res.json()
       if (!res.ok) { setRecoverError(data.error); return }
-      setRecoverResult(data.refunded ?? [])
+      const refunded = data.refunded ?? []
+      setRecoverResult(refunded)
+      if (refunded.length > 0) {
+        toast.success(`Recovered funds from ${refunded.length} chain(s)!`)
+      } else {
+        toast.info('No stranded funds found.')
+      }
     } catch (err: unknown) {
-      setRecoverError(err instanceof Error ? err.message : 'Recovery failed')
+      const msg = err instanceof Error ? err.message : 'Recovery failed'
+      setRecoverError(msg)
+      toast.error(msg)
     } finally {
       setRecovering(false)
     }
@@ -49,7 +58,9 @@ export default function PaymentFailed() {
       await retryJob(jobId)
       navigate(`/progress/${jobId}`)
     } catch (err: unknown) {
-      setRetryError(err instanceof Error ? err.message : 'Retry failed')
+      const msg = err instanceof Error ? err.message : 'Retry failed'
+      setRetryError(msg)
+      toast.error(msg)
       setRetrying(false)
     }
   }

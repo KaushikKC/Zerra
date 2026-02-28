@@ -485,3 +485,53 @@ export async function getMerchantWebhookDeliveries(merchantAddress, limit = 20) 
   );
   return rows;
 }
+
+// ── Platform stats ────────────────────────────────────────────────────────────
+
+export async function getPlatformStats() {
+  await ensureSchema();
+  const { rows: jobs } = await pool.query(
+    `SELECT target_amount, source_plan FROM payment_jobs WHERE status = 'COMPLETE'`
+  );
+  let totalUsdc = 0;
+  const chainSet = new Set();
+  for (const job of jobs) {
+    totalUsdc += parseFloat(job.target_amount) || 0;
+    if (job.source_plan) {
+      try {
+        const plan = typeof job.source_plan === "string" ? JSON.parse(job.source_plan) : job.source_plan;
+        for (const step of plan) if (step.chain) chainSet.add(step.chain);
+      } catch { /* ignore */ }
+    }
+  }
+  const { rows: [{ n }] } = await pool.query(`SELECT COUNT(*) as n FROM merchants`);
+  return {
+    totalPayments: jobs.length,
+    totalUsdcSettled: totalUsdc.toFixed(2),
+    chainsAbstracted: chainSet.size,
+    merchantCount: parseInt(n, 10),
+  };
+}
+
+// ── Stuck job recovery ────────────────────────────────────────────────────────
+
+export async function findStuckJobs() {
+  await ensureSchema();
+  const cutoff = Date.now() - 30 * 60 * 1000;
+  const { rows } = await pool.query(
+    `SELECT id FROM payment_jobs WHERE status IN ('BRIDGING','SWAPPING') AND updated_at < $1 LIMIT 20`,
+    [cutoff]
+  );
+  return rows;
+}
+
+// ── Treasury payout queries ───────────────────────────────────────────────────
+
+export async function getTreasuryPayouts(merchantAddress, limit = 50) {
+  await ensureSchema();
+  const { rows } = await pool.query(
+    `SELECT * FROM payment_jobs WHERE payment_ref = $1 ORDER BY created_at DESC LIMIT $2`,
+    [`treasury:${merchantAddress}`, limit]
+  );
+  return rows.map(rowToJob);
+}
