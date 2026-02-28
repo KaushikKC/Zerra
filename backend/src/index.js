@@ -1,24 +1,11 @@
 import "dotenv/config";
-import express from "express";
-import cors from "cors";
-import apiRoutes from "./api/routes.js";
+import app from "./app.js";
 import { getGatewayInfo } from "./bridge/gatewayBridge.js";
 import { expireStaleJobs, findStuckJobs, updateJobStatus } from "./db/database.js";
 import { tickSubscriptions } from "./subscriptions/subscriptions.js";
 import { seedDemoData } from "./db/seed.js";
 
-const app = express();
 const PORT = process.env.PORT || 3001;
-
-app.use(cors());
-app.use(express.json());
-
-// Mount all API routes under /api
-app.use("/api", apiRoutes);
-
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok", network: process.env.NETWORK ?? "testnet" });
-});
 
 app.listen(PORT, async () => {
   console.log(`Backend running on port ${PORT} (${process.env.NETWORK ?? "testnet"})`);

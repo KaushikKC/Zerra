@@ -27,18 +27,19 @@ const Slide1 = () => (
       <div className="inline-flex items-center gap-3 pill-tag mb-12 shadow-lg animate-float">
         <span className="w-2 h-2 rounded-full bg-fin-dark"></span>
         <span className="font-black uppercase tracking-[0.2em] text-[10px]">
-          Merchant Payment Layer for Arc
+          One-Click USDC Commerce on Arc
         </span>
       </div>
       <h1 className="text-[10vw] font-black leading-none tracking-tighter text-fin-dark mb-12">
         ZERRA
       </h1>
-      <p className="text-3xl md:text-5xl font-medium tracking-tight text-fin-dark/60 max-w-4xl mx-auto leading-tight">
-        Any chain in.{" "}
+      <p className="text-2xl md:text-4xl font-medium tracking-tight text-fin-dark/60 max-w-4xl mx-auto leading-tight">
+        Storefront, payment links, subscriptions, treasury.{" "}
         <span className="text-fin-dark italic underline decoration-fin-lime decoration-[12px] underline-offset-[8px]">
-          USDC on Arc
-        </span>{" "}
-        out. <br className="hidden md:block" /> One click.
+          Pay in USDC from any chain
+        </span>
+        — one tap. <br className="hidden md:block" />
+        <span className="text-fin-dark/70 text-lg md:text-xl mt-4 block">Arc settles. Circle bridges. The payer never thinks about it.</span>
       </p>
       <div className="mt-20 flex justify-center gap-6">
         <div className="w-20 h-1 bg-fin-dark/10 rounded-full"></div>
@@ -59,25 +60,27 @@ const Slide2 = () => (
             Problem
           </span>
           <h2 className="text-5xl md:text-7xl font-black tracking-tighter mb-12 leading-[0.9]">
-            Web3 Payments <br />
+            Crypto Payments <br />
             <span className="text-fin-lime/80 italic">Are Broken</span>
           </h2>
-          <p className="text-2xl text-white/70 font-medium leading-relaxed mb-12">
-            The average user holds funds scattered across 3+ chains. To pay a
-            merchant on Arc:
+          <p className="text-xl text-white/70 font-medium leading-relaxed mb-6">
+            <span className="text-fin-lime font-bold">Payers:</span> USDC on Base, merchant wants Arc — manual bridge, wait, buy gas, switch networks, 3+ signatures. Most give up.
           </p>
-          <div className="space-y-4">
+          <p className="text-xl text-white/70 font-medium leading-relaxed mb-8">
+            <span className="text-fin-lime font-bold">Merchants:</span> Fragmented USDC, no storefront, no invoicing, no recurring billing, no treasury. Notion + MetaMask + spreadsheet.
+          </p>
+          <div className="space-y-3">
             {[
               "Find a bridge manually",
-              "Wait 15–30 minutes for it to complete",
-              "Buy ETH on the destination chain just for gas",
-              "Come back and finally make the payment",
+              "Wait 15–30 minutes",
+              "Buy gas on a chain you don't use",
+              "Come back and finally pay",
             ].map((step, i) => (
               <div key={i} className="flex items-center gap-6 group">
                 <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center font-black text-fin-lime">
                   {i + 1}
                 </div>
-                <span className="text-xl font-bold text-white/90">{step}</span>
+                <span className="text-lg font-bold text-white/90">{step}</span>
               </div>
             ))}
           </div>
@@ -102,7 +105,7 @@ const Slide2 = () => (
       </div>
       <div className="mt-16 p-6 bg-red-500/10 border border-red-500/20 rounded-3xl text-center">
         <p className="text-2xl font-black text-red-400">
-          Result: Web3 commerce doesn't happen.
+          Web2 has Stripe. Crypto doesn't. Yet.
         </p>
       </div>
     </div>
@@ -115,10 +118,13 @@ const Slide3 = () => (
       <span className="text-fin-dark font-black uppercase tracking-[0.3em] text-xs mb-8 block">
         Solution
       </span>
-      <h2 className="text-6xl md:text-[7rem] font-black tracking-tighter text-fin-dark mb-12 leading-[0.85]">
-        One Button. <br />{" "}
-        <span className="text-fin-dark/40 italic">Any Chain.</span> Done.
+      <h2 className="text-5xl md:text-[6rem] font-black tracking-tighter text-fin-dark mb-6 leading-[0.85]">
+        The Stripe of <br />{" "}
+        <span className="text-fin-dark/40 italic">On-Chain Payments</span>
       </h2>
+      <p className="text-xl text-fin-dark/60 font-medium mb-12 max-w-2xl mx-auto">
+        Arc as the settlement rail. One button. Any chain. Done.
+      </p>
       <div className="grid md:grid-cols-3 gap-8 text-left">
         <div className="fin-card">
           <div className="w-16 h-16 bg-fin-lime rounded-2xl flex items-center justify-center mb-8 shadow-lg">
@@ -126,7 +132,7 @@ const Slide3 = () => (
           </div>
           <h3 className="text-2xl font-black mb-4">Abstraction</h3>
           <p className="text-fin-dark/70 font-medium">
-            Scanning, swapping, and bridging — all handled automatically.
+            Scan balances (ETH Sepolia, Base Sepolia, Arc). Swap + bridge via Uniswap V2 & Circle CCTPv2 — all automatic.
           </p>
         </div>
         <div className="fin-card">
@@ -135,16 +141,16 @@ const Slide3 = () => (
           </div>
           <h3 className="text-2xl font-black mb-4">Speed</h3>
           <p className="text-fin-dark/70 font-medium">
-            From any chain to settled USDC on Arc in under 10 seconds.
+            From any chain to settled USDC on Arc in under 10 seconds. Sub-second when already on Arc.
           </p>
         </div>
         <div className="fin-card">
           <div className="w-16 h-16 bg-[#DFECEF] rounded-2xl flex items-center justify-center mb-8 shadow-lg">
             <Shield className="w-8 h-8 text-fin-dark" />
           </div>
-          <h3 className="text-2xl font-black mb-4">Simplicity</h3>
+          <h3 className="text-2xl font-black mb-4">One Signature</h3>
           <p className="text-fin-dark/70 font-medium">
-            No external pages. No gas struggle. One signature.
+            No manual bridge, no network switch, no gas management. Customer signs once. Receipt at /receipt/:jobId.
           </p>
         </div>
       </div>
@@ -157,10 +163,10 @@ const Slide4 = () => (
     <div className="max-w-7xl mx-auto w-full">
       <div className="text-center mb-24">
         <h2 className="text-5xl md:text-7xl font-black mb-8 tracking-tighter">
-          5 Steps. <span className="text-fin-lime">All Invisible.</span>
+          Payer Flow. <span className="text-fin-lime">One Signature.</span>
         </h2>
         <div className="pill-tag !bg-white/5 !text-white/80 !border-white/10 mx-auto inline-flex">
-          Single Signature Sourcing
+          Click link → Connect wallet → Done
         </div>
       </div>
       <div className="grid md:grid-cols-5 gap-4 relative">
@@ -168,27 +174,27 @@ const Slide4 = () => (
         {[
           {
             title: "Scan",
-            desc: "Read balances instantly",
+            desc: "Balances on ETH Sepolia, Base Sepolia, Arc",
             icon: <Smartphone className="w-6 h-6" />,
           },
           {
             title: "Route",
-            desc: "Optimal sourcing plan",
+            desc: "ETH→Uniswap V2→USDC; or CCTPv2 bridge; or direct",
             icon: <Layers className="w-6 h-6" />,
           },
           {
             title: "Bridge",
-            desc: "Gateway < 500ms",
+            desc: "Circle CCTPv2 when needed",
             icon: <Zap className="w-6 h-6" />,
           },
           {
-            title: "Settle",
-            desc: "Minted on Arc",
+            title: "Sign",
+            desc: "One USDC transfer to session key",
             icon: <CheckCircle2 className="w-6 h-6" />,
           },
           {
-            title: "Pay",
-            desc: "Merchant settled",
+            title: "Done",
+            desc: "Merchant on Arc. Receipt /receipt/:jobId",
             icon: <ShoppingBag className="w-6 h-6" />,
           },
         ].map((step, i) => (
@@ -210,7 +216,7 @@ const Slide4 = () => (
 const Slide5 = () => (
   <section className="h-full flex items-center bg-fin-bg relative px-8 md:px-16">
     <div className="max-w-7xl mx-auto w-full">
-      <h2 className="text-6xl md:text-7xl font-black text-center mb-24 tracking-tighter">
+      <h2 className="text-5xl md:text-6xl font-black text-center mb-16 tracking-tighter">
         A Complete{" "}
         <span className="text-fin-dark/40 italic">Commerce Product</span>
       </h2>
@@ -224,17 +230,21 @@ const Slide5 = () => (
           </div>
           <div className="grid gap-3">
             {[
-              "Arc wallet display name",
-              "Payment links & QR codes",
-              "Product Storefront",
-              "Full dashboard & webhooks",
+              "Connect wallet → register store in 30s",
+              "Storefront slug + products with prices",
+              "Payment links & QR for invoices",
+              "Revenue splits on-chain (PaymentRouter.sol)",
+              "Webhooks on payment confirm",
+              "Subscriptions (recurring, one-time auth)",
+              "Batch treasury payouts",
+              "Deposit to Arc Gateway → bridge out anywhere",
             ].map((item, i) => (
               <div
                 key={i}
-                className="flex items-center gap-4 p-4 rounded-xl bg-white border border-fin-dark/5"
+                className="flex items-center gap-4 p-3 rounded-xl bg-white border border-fin-dark/5"
               >
-                <CheckCircle2 className="w-5 h-5 text-fin-lime" />
-                <span className="font-bold text-fin-dark/80">{item}</span>
+                <CheckCircle2 className="w-5 h-5 text-fin-lime flex-shrink-0" />
+                <span className="font-bold text-fin-dark/80 text-sm">{item}</span>
               </div>
             ))}
           </div>
@@ -244,21 +254,22 @@ const Slide5 = () => (
             <div className="w-12 h-12 bg-fin-lime text-fin-dark rounded-2xl flex items-center justify-center">
               <Wallet className="w-6 h-6" />
             </div>
-            <h3 className="text-3xl font-black">Payer</h3>
+            <h3 className="text-3xl font-black">Payer / Customer</h3>
           </div>
           <div className="grid gap-3">
             {[
-              "Pre-filled details",
-              "Auto balance scan",
-              "One MetaMask popup",
-              "Live progress tracker",
+              "Click payment link or Buy Now",
+              "Connect wallet — auto balance scan",
+              "Optimal route (swap + bridge or direct)",
+              "One signature — USDC to session key",
+              "Done. Receipt at /receipt/:jobId",
             ].map((item, i) => (
               <div
                 key={i}
-                className="flex items-center gap-4 p-4 rounded-xl bg-white border border-fin-dark/5"
+                className="flex items-center gap-4 p-3 rounded-xl bg-white border border-fin-dark/5"
               >
-                <CheckCircle2 className="w-5 h-5 text-fin-dark/20" />
-                <span className="font-bold text-fin-dark/80">{item}</span>
+                <CheckCircle2 className="w-5 h-5 text-fin-dark/20 flex-shrink-0" />
+                <span className="font-bold text-fin-dark/80 text-sm">{item}</span>
               </div>
             ))}
           </div>
@@ -273,37 +284,33 @@ const Slide6 = () => (
     <div className="max-w-7xl mx-auto w-full">
       <div className="text-center mb-16">
         <h2 className="text-5xl md:text-7xl font-black mb-4 tracking-tighter">
-          Zerra vs Trails
+          Arc as the <span className="text-fin-dark/60 italic">Liquidity Hub</span>
         </h2>
         <p className="text-xl font-black text-fin-dark/60 uppercase tracking-widest">
-          Actual Product vs Infrastructure
+          Payments in from every chain. Settle on Arc. Bridge out anywhere.
         </p>
       </div>
       <div className="overflow-hidden rounded-3xl border border-fin-dark/10 bg-white/50 backdrop-blur-sm">
         <table className="w-full text-left">
           <thead>
             <tr className="bg-fin-dark text-white">
-              <th className="py-6 px-8 text-xl font-black">Feature</th>
-              <th className="py-6 px-8 text-xl font-black text-white/40">
-                Trails
-              </th>
+              <th className="py-6 px-8 text-xl font-black">Step</th>
               <th className="py-6 px-8 text-xl font-black text-fin-lime">
-                Zerra
+                Zerra + Arc
               </th>
             </tr>
           </thead>
           <tbody className="text-lg font-bold">
             {[
-              { f: "Type", t: "SDK", z: "Consumer Product" },
-              { f: "Bridge", t: "CCTP (~30s)", z: "Gateway (<0.5s)" },
-              { f: "Merchants", t: "None", z: "Storefront/QR" },
-              { f: "Gas", t: "Manual", z: "Arc-native USDC" },
-              { f: "Splits", t: "No", z: "Yes — On-chain" },
+              { step: "In", detail: "Any chain (ETH / Base / Arc) — one signature" },
+              { step: "Session Key", detail: "Swap if needed (Uniswap V2), bridge (CCTPv2)" },
+              { step: "Settle", detail: "Arc Testnet — PaymentRouter.sol pay / splitPay" },
+              { step: "Merchant", detail: "USDC on Arc. Deposit to Circle GatewayWallet" },
+              { step: "Out", detail: "Bridge to Ethereum / Base / anywhere" },
             ].map((row, i) => (
               <tr key={i} className="border-b border-fin-dark/5">
-                <td className="py-6 px-8">{row.f}</td>
-                <td className="py-6 px-8 text-fin-dark/30">{row.t}</td>
-                <td className="py-6 px-8 bg-fin-lime/5 font-black">{row.z}</td>
+                <td className="py-5 px-8 font-black text-fin-dark/70">{row.step}</td>
+                <td className="py-5 px-8 bg-fin-lime/5">{row.detail}</td>
               </tr>
             ))}
           </tbody>
@@ -316,32 +323,32 @@ const Slide6 = () => (
 const Slide7 = () => (
   <section className="h-full flex items-center bg-fin-dark text-white px-8 md:px-16">
     <div className="max-w-7xl mx-auto w-full">
-      <h2 className="text-6xl md:text-7xl font-black mb-20 tracking-tighter text-center">
-        Built Right, <span className="text-fin-lime/80 italic">Not Fast</span>
+      <h2 className="text-5xl md:text-7xl font-black mb-16 tracking-tighter text-center">
+        Key <span className="text-fin-lime/80 italic">Technologies</span>
       </h2>
       <div className="grid md:grid-cols-2 gap-8">
         {[
           {
-            title: "Circle Gateway",
-            desc: "Sub-500ms settlement. One unified USDC balance.",
+            title: "Circle CCTPv2",
+            desc: "Cross-chain USDC — 1 bps fee, no manual attestation. Bridge in/out via Gateway.",
             icon: <Zap className="text-fin-dark" />,
             bg: "bg-fin-lime",
           },
           {
             title: "Session Keys",
-            desc: "User authorizes once. Backend executes silently.",
+            desc: "AES-256-CBC encrypted EOAs. Temporary signers hold and move USDC. One user signature.",
             icon: <Shield className="text-fin-lime" />,
             bg: "bg-white/10",
           },
           {
-            title: "USDC Gas",
-            desc: "Destination minting costs zero legacy gas tokens.",
+            title: "USDC Gas on Arc",
+            desc: "Settlement on Arc (chainId 5042002). USDC is native gas — no legacy gas tokens.",
             icon: <Globe className="text-blue-400" />,
             bg: "bg-blue-500/10",
           },
           {
-            title: "Smart Splits",
-            desc: "Revenue sharing handled natively on-chain.",
+            title: "PaymentRouter.sol",
+            desc: "pay() + splitPay() — bps-based revenue sharing enforced on-chain.",
             icon: <Layers className="text-orange-400" />,
             bg: "bg-orange-500/10",
           },
@@ -373,13 +380,13 @@ const Slide8 = () => (
             PaymentRouter.sol
           </h2>
           <p className="text-xl text-fin-dark/60 font-medium mb-10">
-            Single `pay()` call handles settlement, fees, and splits with USDC
-            as gas.
+            pay() and splitPay() on Arc. Bps-based revenue sharing. USDC as gas.
           </p>
           <div className="space-y-4">
             {[
-              "Platform fee deduction",
+              "Platform fee deduction (bps)",
               "Merchant settlement",
+              "splitPay() — multiple recipients, bps splits",
               "On-chain event logging",
             ].map((item, i) => (
               <div
@@ -400,15 +407,18 @@ const Slide8 = () => (
   address merchant,
   uint256 amount,
   string memory refId
+) external { ... }
+
+function splitPay(
+  address merchant,
+  address[] recipients,
+  uint256[] bps,
+  uint256 amount,
+  string memory refId
 ) external {
-  // 1. Fee deduction
-  uint256 fee = amount * 10 / 1000;
-  usdc.transfer(treasury, fee);
-
-  // 2. Settlement
-  usdc.transfer(merchant, amount - fee);
-
-  emit Paid(merchant, amount, refId);
+  // bps-based revenue sharing
+  // e.g. 80% merchant, 20% co-founder
+  emit SplitPaid(...);
 }`}
           </pre>
         </div>
@@ -420,21 +430,21 @@ const Slide8 = () => (
 const Slide9 = () => (
   <section className="h-full flex items-center bg-fin-dark text-white px-8 md:px-16">
     <div className="max-w-7xl mx-auto w-full text-center">
-      <h2 className="text-5xl md:text-7xl font-black mb-20 tracking-tighter">
+      <h2 className="text-5xl md:text-7xl font-black mb-16 tracking-tighter">
         The <span className="text-fin-lime italic">Stack</span>
       </h2>
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
         {[
-          { l: "Bridge", v: "Gateway", i: <Zap /> },
+          { l: "Settlement", v: "Arc (5042002)", i: <Globe /> },
+          { l: "Bridge", v: "Circle CCTPv2", i: <Zap /> },
+          { l: "Swap", v: "Uniswap V2", i: <Layers /> },
+          { l: "Contract", v: "PaymentRouter.sol", i: <Code /> },
+          { l: "Session", v: "AES-256 EOAs", i: <Shield /> },
+          { l: "Auth", v: "HMAC + wallet-sig", i: <Cpu /> },
+          { l: "DB", v: "SQLite / Supabase", i: <Server /> },
+          { l: "UI", v: "React 19 + Tailwind 4", i: <Layout /> },
+          { l: "Wallet", v: "wagmi + RainbowKit", i: <Smartphone /> },
           { l: "Asset", v: "USDC", i: <Repeat /> },
-          { l: "Chain", v: "Arc", i: <Globe /> },
-          { l: "Gas", v: "USDC", i: <Cpu /> },
-          { l: "AA", v: "4337", i: <Smartphone /> },
-          { l: "Swap", v: "1inch", i: <Layers /> },
-          { l: "Logic", v: "Solidity", i: <Code /> },
-          { l: "UI", v: "React", i: <Layout /> },
-          { l: "API", v: "Node", i: <Server /> },
-          { l: "Dev", v: "Vite", i: <Code /> },
         ].map((item, i) => (
           <div key={i} className="fin-card !bg-white/5 !border-white/10 !p-8">
             <div className="text-fin-lime mb-4 flex justify-center">
@@ -454,30 +464,33 @@ const Slide9 = () => (
 const Slide10 = () => (
   <section className="h-full flex items-center bg-fin-bg px-8 md:px-16">
     <div className="max-w-7xl mx-auto w-full">
-      <h2 className="text-6xl font-black text-center mb-16 tracking-tighter">
+      <h2 className="text-6xl font-black text-center mb-12 tracking-tighter">
         Architecture
       </h2>
-      <div className="relative p-12 bg-white border border-fin-dark/10 rounded-[3rem] shadow-xl overflow-hidden">
-        <div className="grid lg:grid-cols-3 gap-8 items-center text-center relative z-10">
-          <div className="p-8 bg-fin-dark rounded-3xl text-white">
-            <div className="text-[10px] font-black uppercase mb-4 opacity-50">
-              In
-            </div>
-            <div className="text-lg font-black">Any Chain (ETH/Base)</div>
+      <div className="relative p-8 md:p-12 bg-white border border-fin-dark/10 rounded-[3rem] shadow-xl overflow-hidden">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 items-center text-center relative z-10 text-sm">
+          <div className="p-6 bg-fin-dark rounded-2xl text-white">
+            <div className="text-[10px] font-black uppercase mb-2 opacity-50">In</div>
+            <div className="font-black">Any Chain (ETH/Base/Arc)</div>
           </div>
-          <div className="p-10 bg-fin-lime rounded-[2.5rem] text-fin-dark shadow-xl">
-            <div className="text-xs font-black uppercase mb-2">Process</div>
-            <div className="text-xl font-black">Zerra Core</div>
-            <div className="text-[10px] font-bold">Circle Gateway</div>
+          <div className="p-6 bg-white/80 border border-fin-dark/10 rounded-2xl text-fin-dark">
+            <div className="text-[10px] font-black uppercase mb-2 opacity-50">Step 1</div>
+            <div className="font-black">Session Key EOA</div>
           </div>
-          <div className="p-8 bg-fin-teal rounded-3xl text-fin-dark">
-            <div className="text-[10px] font-black uppercase mb-4 opacity-50">
-              Out
-            </div>
-            <div className="text-lg font-black">USDC on Arc</div>
+          <div className="p-6 bg-fin-lime/20 border border-fin-lime/30 rounded-2xl text-fin-dark">
+            <div className="text-[10px] font-black uppercase mb-2 opacity-70">Step 2</div>
+            <div className="font-black">Uniswap V2 + CCTPv2</div>
+          </div>
+          <div className="p-6 bg-fin-teal/80 rounded-2xl text-fin-dark">
+            <div className="text-[10px] font-black uppercase mb-2 opacity-70">Settle</div>
+            <div className="font-black">PaymentRouter → Merchant</div>
+          </div>
+          <div className="p-6 bg-fin-dark rounded-2xl text-white">
+            <div className="text-[10px] font-black uppercase mb-2 opacity-50">Out</div>
+            <div className="font-black">GatewayWallet → Any chain</div>
           </div>
         </div>
-        <div className="absolute top-0 left-0 w-full h-full bg-dot-grid opacity-10" />
+        <div className="absolute top-0 left-0 w-full h-full bg-dot-grid opacity-10 pointer-events-none" />
       </div>
     </div>
   </section>
@@ -492,24 +505,24 @@ const Slide11 = () => (
       <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
         {[
           {
-            t: "Freelancing",
-            d: "Invoices paid from any chain, settled on Arc.",
-            i: <Code />,
-          },
-          {
-            t: "Commerce",
-            d: "One-click pay buttons for every dApp.",
+            t: "Storefront & Invoices",
+            d: "Products, payment links, QR codes. Pay from any chain, settled on Arc.",
             i: <ShoppingBag />,
           },
           {
             t: "Subscriptions",
-            d: "One-time auth for recurring monthly USDC.",
+            d: "Recurring USDC billing with one-time customer authorization.",
             i: <Repeat />,
           },
           {
-            t: "Revenue",
-            d: "Native on-chain splits for co-founders.",
+            t: "Revenue Splits",
+            d: "splitPay() — 80/20 co-founder splits enforced on-chain.",
             i: <Share2 />,
+          },
+          {
+            t: "Treasury & Gateway",
+            d: "Batch payouts + deposit to Circle Gateway, bridge out anywhere.",
+            i: <Code />,
           },
         ].map((item, i) => (
           <div key={i} className="fin-card !bg-white/5 !border-white/10 !p-8">
@@ -578,7 +591,7 @@ const Slide13 = () => (
         Go to Website <ArrowRight className="w-6 h-6" />
       </Link>
       <div className="mt-24 text-[10px] font-black uppercase tracking-[0.4em] opacity-30">
-        Built for Encode × Arc Hackathon
+        Built for Arc DeFi Hackathon
       </div>
     </div>
   </section>
