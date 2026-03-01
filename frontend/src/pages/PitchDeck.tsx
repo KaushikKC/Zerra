@@ -10,12 +10,10 @@ import {
   ShoppingBag,
   Layout,
   Code,
-  Server,
   CheckCircle2,
   Share2,
   Layers,
   Repeat,
-  Cpu,
   Smartphone,
 } from "lucide-react";
 
@@ -279,218 +277,28 @@ const Slide5 = () => (
   </section>
 );
 
-const Slide6 = () => (
-  <section className="h-full flex items-center bg-fin-teal relative overflow-hidden px-8 md:px-16">
-    <div className="max-w-7xl mx-auto w-full">
-      <div className="text-center mb-16">
-        <h2 className="text-5xl md:text-7xl font-black mb-4 tracking-tighter">
-          Arc as the <span className="text-fin-dark/60 italic">Liquidity Hub</span>
-        </h2>
-        <p className="text-xl font-black text-fin-dark/60 uppercase tracking-widest">
-          Payments in from every chain. Settle on Arc. Bridge out anywhere.
-        </p>
-      </div>
-      <div className="overflow-hidden rounded-3xl border border-fin-dark/10 bg-white/50 backdrop-blur-sm">
-        <table className="w-full text-left">
-          <thead>
-            <tr className="bg-fin-dark text-white">
-              <th className="py-6 px-8 text-xl font-black">Step</th>
-              <th className="py-6 px-8 text-xl font-black text-fin-lime">
-                Zerra + Arc
-              </th>
-            </tr>
-          </thead>
-          <tbody className="text-lg font-bold">
-            {[
-              { step: "In", detail: "Any chain (ETH / Base / Arc) — one signature" },
-              { step: "Session Key", detail: "Swap if needed (Uniswap V2), bridge (CCTPv2)" },
-              { step: "Settle", detail: "Arc Testnet — PaymentRouter.sol pay / splitPay" },
-              { step: "Merchant", detail: "USDC on Arc. Deposit to Circle GatewayWallet" },
-              { step: "Out", detail: "Bridge to Ethereum / Base / anywhere" },
-            ].map((row, i) => (
-              <tr key={i} className="border-b border-fin-dark/5">
-                <td className="py-5 px-8 font-black text-fin-dark/70">{row.step}</td>
-                <td className="py-5 px-8 bg-fin-lime/5">{row.detail}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-);
+const YOUTUBE_EMBED_ID = "6gU8e4Zfrhk";
 
-const Slide7 = () => (
-  <section className="h-full flex items-center bg-fin-dark text-white px-8 md:px-16">
-    <div className="max-w-7xl mx-auto w-full">
-      <h2 className="text-5xl md:text-7xl font-black mb-16 tracking-tighter text-center">
-        Key <span className="text-fin-lime/80 italic">Technologies</span>
+const SlideDemo = () => (
+  <section className="h-full flex items-center bg-fin-dark text-white relative overflow-hidden px-8 md:px-16 py-6">
+    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[80%] h-[50%] bg-fin-lime/5 rounded-full blur-[100px] -z-10" />
+    <div className="max-w-6xl mx-auto w-full flex flex-col items-center">
+      <h2 className="text-4xl md:text-5xl font-black mb-1 tracking-tighter text-center">
+        Demo
       </h2>
-      <div className="grid md:grid-cols-2 gap-8">
-        {[
-          {
-            title: "Circle CCTPv2",
-            desc: "Cross-chain USDC — 1 bps fee, no manual attestation. Bridge in/out via Gateway.",
-            icon: <Zap className="text-fin-dark" />,
-            bg: "bg-fin-lime",
-          },
-          {
-            title: "Session Keys",
-            desc: "AES-256-CBC encrypted EOAs. Temporary signers hold and move USDC. One user signature.",
-            icon: <Shield className="text-fin-lime" />,
-            bg: "bg-white/10",
-          },
-          {
-            title: "USDC Gas on Arc",
-            desc: "Settlement on Arc (chainId 5042002). USDC is native gas — no legacy gas tokens.",
-            icon: <Globe className="text-blue-400" />,
-            bg: "bg-blue-500/10",
-          },
-          {
-            title: "PaymentRouter.sol",
-            desc: "pay() + splitPay() — bps-based revenue sharing enforced on-chain.",
-            icon: <Layers className="text-orange-400" />,
-            bg: "bg-orange-500/10",
-          },
-        ].map((item, i) => (
-          <div key={i} className="fin-card !bg-white/5 !border-white/10 !p-10">
-            <div
-              className={`w-12 h-12 rounded-xl ${item.bg} flex items-center justify-center mb-6`}
-            >
-              {item.icon}
-            </div>
-            <h3 className="text-2xl font-black mb-4">{item.title}</h3>
-            <p className="text-white/60 font-medium leading-relaxed">
-              {item.desc}
-            </p>
-          </div>
-        ))}
-      </div>
-    </div>
-  </section>
-);
-
-const Slide8 = () => (
-  <section className="h-full flex items-center bg-fin-bg px-8 md:px-16">
-    <div className="max-w-7xl mx-auto w-full">
-      <div className="grid lg:grid-cols-2 gap-20 items-center">
-        <div>
-          <span className="pill-tag mb-8">Smart Contract</span>
-          <h2 className="text-5xl font-black mb-8 tracking-tighter">
-            PaymentRouter.sol
-          </h2>
-          <p className="text-xl text-fin-dark/60 font-medium mb-10">
-            pay() and splitPay() on Arc. Bps-based revenue sharing. USDC as gas.
-          </p>
-          <div className="space-y-4">
-            {[
-              "Platform fee deduction (bps)",
-              "Merchant settlement",
-              "splitPay() — multiple recipients, bps splits",
-              "On-chain event logging",
-            ].map((item, i) => (
-              <div
-                key={i}
-                className="flex items-center gap-4 text-lg font-bold"
-              >
-                <div className="w-5 h-5 rounded-full bg-fin-lime flex items-center justify-center">
-                  <CheckCircle2 className="w-3 h-3 text-fin-dark" />
-                </div>
-                {item}
-              </div>
-            ))}
-          </div>
+      <p className="text-fin-lime/90 font-bold text-xs uppercase tracking-widest mb-4 text-center">
+        Play the walkthrough
+      </p>
+      <div className="w-full rounded-2xl overflow-hidden border-2 border-white/10 shadow-2xl bg-black/40 flex-1 min-h-0 flex flex-col max-h-[calc(100vh-12rem)]">
+        <div className="relative w-full flex-1 min-h-[240px] md:min-h-[320px]" style={{ aspectRatio: "16/9" }}>
+          <iframe
+            title="Zerra demo"
+            src={`https://www.youtube.com/embed/${YOUTUBE_EMBED_ID}?rel=0`}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+            className="absolute inset-0 w-full h-full"
+          />
         </div>
-        <div className="bg-fin-dark rounded-[2rem] p-8 shadow-2xl overflow-hidden font-mono text-xs md:text-sm">
-          <pre className="text-fin-lime leading-relaxed">
-            {`function pay(
-  address merchant,
-  uint256 amount,
-  string memory refId
-) external { ... }
-
-function splitPay(
-  address merchant,
-  address[] recipients,
-  uint256[] bps,
-  uint256 amount,
-  string memory refId
-) external {
-  // bps-based revenue sharing
-  // e.g. 80% merchant, 20% co-founder
-  emit SplitPaid(...);
-}`}
-          </pre>
-        </div>
-      </div>
-    </div>
-  </section>
-);
-
-const Slide9 = () => (
-  <section className="h-full flex items-center bg-fin-dark text-white px-8 md:px-16">
-    <div className="max-w-7xl mx-auto w-full text-center">
-      <h2 className="text-5xl md:text-7xl font-black mb-16 tracking-tighter">
-        The <span className="text-fin-lime italic">Stack</span>
-      </h2>
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
-        {[
-          { l: "Settlement", v: "Arc (5042002)", i: <Globe /> },
-          { l: "Bridge", v: "Circle CCTPv2", i: <Zap /> },
-          { l: "Swap", v: "Uniswap V2", i: <Layers /> },
-          { l: "Contract", v: "PaymentRouter.sol", i: <Code /> },
-          { l: "Session", v: "AES-256 EOAs", i: <Shield /> },
-          { l: "Auth", v: "HMAC + wallet-sig", i: <Cpu /> },
-          { l: "DB", v: "SQLite / Supabase", i: <Server /> },
-          { l: "UI", v: "React 19 + Tailwind 4", i: <Layout /> },
-          { l: "Wallet", v: "wagmi + RainbowKit", i: <Smartphone /> },
-          { l: "Asset", v: "USDC", i: <Repeat /> },
-        ].map((item, i) => (
-          <div key={i} className="fin-card !bg-white/5 !border-white/10 !p-8">
-            <div className="text-fin-lime mb-4 flex justify-center">
-              {item.i}
-            </div>
-            <div className="text-[9px] font-black uppercase tracking-widest text-white/30 mb-2">
-              {item.l}
-            </div>
-            <div className="text-lg font-black">{item.v}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  </section>
-);
-
-const Slide10 = () => (
-  <section className="h-full flex items-center bg-fin-bg px-8 md:px-16">
-    <div className="max-w-7xl mx-auto w-full">
-      <h2 className="text-6xl font-black text-center mb-12 tracking-tighter">
-        Architecture
-      </h2>
-      <div className="relative p-8 md:p-12 bg-white border border-fin-dark/10 rounded-[3rem] shadow-xl overflow-hidden">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 items-center text-center relative z-10 text-sm">
-          <div className="p-6 bg-fin-dark rounded-2xl text-white">
-            <div className="text-[10px] font-black uppercase mb-2 opacity-50">In</div>
-            <div className="font-black">Any Chain (ETH/Base/Arc)</div>
-          </div>
-          <div className="p-6 bg-white/80 border border-fin-dark/10 rounded-2xl text-fin-dark">
-            <div className="text-[10px] font-black uppercase mb-2 opacity-50">Step 1</div>
-            <div className="font-black">Session Key EOA</div>
-          </div>
-          <div className="p-6 bg-fin-lime/20 border border-fin-lime/30 rounded-2xl text-fin-dark">
-            <div className="text-[10px] font-black uppercase mb-2 opacity-70">Step 2</div>
-            <div className="font-black">Uniswap V2 + CCTPv2</div>
-          </div>
-          <div className="p-6 bg-fin-teal/80 rounded-2xl text-fin-dark">
-            <div className="text-[10px] font-black uppercase mb-2 opacity-70">Settle</div>
-            <div className="font-black">PaymentRouter → Merchant</div>
-          </div>
-          <div className="p-6 bg-fin-dark rounded-2xl text-white">
-            <div className="text-[10px] font-black uppercase mb-2 opacity-50">Out</div>
-            <div className="font-black">GatewayWallet → Any chain</div>
-          </div>
-        </div>
-        <div className="absolute top-0 left-0 w-full h-full bg-dot-grid opacity-10 pointer-events-none" />
       </div>
     </div>
   </section>
@@ -538,39 +346,6 @@ const Slide11 = () => (
   </section>
 );
 
-const Slide12 = () => (
-  <section className="h-full flex items-center bg-fin-bg px-8 md:px-16">
-    <div className="max-w-7xl mx-auto w-full">
-      <div className="fin-card !p-12 relative overflow-hidden bg-white/50 backdrop-blur-sm">
-        <div className="grid lg:grid-cols-2 gap-16 items-center">
-          <div>
-            <h2 className="text-5xl font-black mb-6 tracking-tighter">
-              Mainnet Ready
-            </h2>
-            <p className="text-xl text-fin-dark/70 font-medium mb-10 leading-relaxed">
-              Single .env switch transforms the stack from UniV2/Sepolia to
-              1inch/Ethereum. Zero re-architecture.
-            </p>
-            <ul className="space-y-4 font-bold text-fin-dark/60">
-              <li>• Switch Swap Providers via interface</li>
-              <li>• Point Gateway to Mainnet API</li>
-              <li>• Deploy PaymentRouter to Arc Mainnet</li>
-            </ul>
-          </div>
-          <div className="bg-fin-dark rounded-2xl p-8 text-white font-mono text-lg shadow-xl">
-            <div className="text-fin-lime opacity-50 text-sm mb-4">
-              # Switch in 1 second
-            </div>
-            <div>
-              <span className="text-white/30">NETWORK=</span>mainnet
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-);
-
 const Slide13 = () => (
   <section className="h-full flex items-center bg-fin-dark text-white text-center relative overflow-hidden px-8 md:px-16">
     <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[120%] h-[120%] bg-fin-lime/5 rounded-full blur-[120px]" />
@@ -603,13 +378,8 @@ const SLIDES = [
   Slide3,
   Slide4,
   Slide5,
-  Slide6,
-  Slide7,
-  Slide8,
-  Slide9,
-  Slide10,
   Slide11,
-  Slide12,
+  SlideDemo,
   Slide13,
 ];
 
