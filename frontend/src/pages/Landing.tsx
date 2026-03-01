@@ -38,7 +38,6 @@ export default function Landing() {
           <a href="#how-it-works" className="hover:text-[#132318] transition-colors">How it works</a>
           <a href="#features" className="hover:text-[#132318] transition-colors">Features</a>
           <Link to="/stores" className="hover:text-[#132318] transition-colors">Stores</Link>
-          <Link to="/store/arc-dev" className="hover:text-[#132318] transition-colors">Demo Store</Link>
           <Link to="/merchant" className="hover:text-[#132318] transition-colors">Sell</Link>
         </div>
         <Link to="/stores" className="btn-primary py-3 px-8">
@@ -66,9 +65,6 @@ export default function Landing() {
             <div className="flex flex-wrap gap-6">
               <Link to="/stores" className="btn-primary text-xl px-12 py-6 shadow-2xl shadow-[#132318]/20">
                 Browse stores <ArrowRight className="w-6 h-6" />
-              </Link>
-              <Link to="/store/arc-dev" className="btn-secondary text-xl px-12 py-6">
-                View Demo Store
               </Link>
               <Link to="/merchant" className="btn-secondary text-xl px-12 py-6">
                 Open Your Store
@@ -230,9 +226,6 @@ export default function Landing() {
               <div className="flex flex-wrap gap-6">
                 <Link to="/merchant" className="btn-primary text-xl px-12 py-6 shadow-2xl shadow-[#132318]/20">
                   Open Your Store <ArrowRight className="w-6 h-6" />
-                </Link>
-                <Link to="/store/arc-dev" className="btn-secondary text-xl px-12 py-6">
-                  See Example Store
                 </Link>
               </div>
             </div>
